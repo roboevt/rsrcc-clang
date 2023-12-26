@@ -198,6 +198,62 @@ RsrccVisitor::evaluateIntegerLiteral(IntegerLiteral *expr) {
   return loc;
 }
 
+RsrccVisitor::Location RsrccVisitor::evaluateStmt(Stmt *stmt) {
+  if (Expr* expr = dyn_cast<Expr>(stmt)) {
+    return evaluateExpression(expr);
+  } if(ReturnStmt* stmt2 = dyn_cast<ReturnStmt>(stmt)) {
+    return evaluateReturnStmt(stmt2);
+  } if(IfStmt* stmt2 = dyn_cast<IfStmt>(stmt)) {
+    return evaluateIfStmt(stmt2);
+  } if(DeclStmt* stmt2 = dyn_cast<DeclStmt>(stmt)) {
+    for (DeclStmt::decl_iterator DI = stmt2->decl_begin();
+           DI != stmt2->decl_end(); ++DI) {
+        if (isa<VarDecl>(*DI)) {
+          evaluateVarDecl(cast<VarDecl>(*DI));
+        }
+      }
+      return Location();
+  } if(BinaryOperator* stmt2 = dyn_cast<BinaryOperator>(stmt)) {
+    return evaluateBinaryOperator(stmt2);
+  } if(CallExpr* stmt2 = dyn_cast<CallExpr>(stmt)) {
+    return evaluateCallExpr(stmt2);
+  // } if(WhileStmt* stmt = dyn_cast<WhileStmt>(stmt)) {
+  //   return evaluateWhileStmt(stmt);
+  // } if(ForStmt* stmt = dyn_cast<ForStmt>(stmt)) {
+  //   return evaluateForStmt(stmt);
+  } if(CompoundStmt* stmt2 = dyn_cast<CompoundStmt>(stmt)) {
+    for (Stmt::child_iterator i = stmt2->child_begin(); i != stmt2->child_end();
+       ++i) {
+      evaluateStmt(*i);
+    }
+    return Location();
+  } if(ImplicitCastExpr* stmt2 = dyn_cast<ImplicitCastExpr>(stmt)) {
+    return evaluateStmt(stmt2->getSubExpr());
+  } if(NullStmt* stmt2 = dyn_cast<NullStmt>(stmt)) {
+    (void)stmt2;
+    return Location();
+  }
+  // } if(DoStmt* stmt = dyn_cast<DoStmt>(stmt)) {
+    // return evaluateDoStmt(stmt);
+  // } if(BreakStmt* stmt = dyn_cast<BreakStmt>(stmt)) {
+  //   return evaluateBreakStmt(stmt);
+  // } if(ContinueStmt* stmt = dyn_cast<ContinueStmt>(stmt)) {
+  //   return evaluateContinueStmt(stmt);
+  // } if(SwitchStmt* stmt = dyn_cast<SwitchStmt>(stmt)) {
+  //   return evaluateSwitchStmt(stmt);
+  // } if(CaseStmt* stmt = dyn_cast<CaseStmt>(stmt)) {
+  //   return evaluateCaseStmt(stmt);
+  // } if(DefaultStmt* stmt = dyn_cast<DefaultStmt>(stmt)) {
+  //   return evaluateDefaultStmt(stmt);
+  // } if(LabelStmt* stmt = dyn_cast<LabelStmt>(stmt)) {
+  //   return evaluateLabelStmt(stmt);
+  // } if(GotoStmt* stmt
+
+  llvm::errs() << "Error: unsupported statement: ";
+  stmt->dump();
+  return Location();
+}
+
 RsrccVisitor::Location RsrccVisitor::evaluateExpression(Expr *expr) {
   if (DeclRefExpr *declRefExpr = dyn_cast<DeclRefExpr>(expr)) {
     return evaluateDeclRefExpr(declRefExpr);
@@ -252,6 +308,54 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
   return lhsLoc;
 }
 
+std::string RsrccVisitor::compareHelper(std::string_view opStr) {
+  
+  if (opStr == "<") {
+    return "brmi";
+  } else if (opStr == ">") {
+    return "brpl";  // TODO positive or zero, so gt or eq, not gt
+  } else {
+    llvm::errs() << "Error: unsupported compare: " << opStr << "\n";
+    return "";
+  }
+}
+
+RsrccVisitor::Location RsrccVisitor::evaluateCompare(BinaryOperator *op) {
+  std::string_view opStr = op->getOpcodeStr();
+
+  Expr *lhs = op->getLHS()->IgnoreParenImpCasts();
+  Expr *rhs = op->getRHS()->IgnoreParenImpCasts();
+
+  debug("visitCompare: " + std::string(opStr));
+  Location lhsLoc = evaluateExpression(lhs);
+  Location rhsLoc = evaluateExpression(rhs);
+
+  if (!lhsLoc.isReg() || !rhsLoc.isReg()) {
+    // TODO compare stack
+    llvm::errs() << "Error: compare requires registers\n";
+    return Location();
+  }
+
+  std::string instruction = compareHelper(opStr);
+
+  int falseLabel = currentLabel++;
+  int endLabel = currentLabel++;
+  // Comparison
+  emit("sub " + EAXs + ", " + lhsLoc.toString() + ", " + rhsLoc.toString());
+  emit("lar " + RTEMPs + ", label" + std::to_string(falseLabel));
+  emit(instruction + " " + RTEMPs + ", " + EAXs + "; cmp");
+  // True
+  emit("lar " + EAXs + ", 0");
+  emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
+  emit("br " + RTEMPs + " ; cmp");
+  // False
+  emit("label" + std::to_string(falseLabel) + ":");
+  emit("lar " + EAXs + ", 1");
+  emit("label" + std::to_string(endLabel) + ":");
+
+  return Location::EAX;
+}
+
 RsrccVisitor::Location
 RsrccVisitor::evaluateBinaryOperator(BinaryOperator *op) {
   std::string_view opStr = op->getOpcodeStr();
@@ -259,9 +363,42 @@ RsrccVisitor::evaluateBinaryOperator(BinaryOperator *op) {
     return evaluateAssign(op);
   } else if (opStr == "+" || opStr == "-") {
     return evaluateCompute(op);
+  } else if (opStr == "<" || opStr == ">") {
+    return evaluateCompare(op);
   }
 
   llvm::errs() << "Error: unsupported binary operator: " << opStr << "\n";
+  return Location();
+}
+
+RsrccVisitor::Location RsrccVisitor::evaluateIfStmt(IfStmt *stmt) {
+  Expr *cond = stmt->getCond()->IgnoreParenImpCasts();
+  Stmt *then = stmt->getThen();
+  Stmt *elseStmt = stmt->getElse();
+
+  debug("evaluateIfStmt");
+
+  int elseLabel = currentLabel++;
+  int endLabel = currentLabel++;
+
+  Location condLoc = evaluateExpression(cond);
+  emit("lar " + RTEMPs + ", label" + std::to_string(elseLabel));
+  emit("brzr " + RTEMPs + ", " + condLoc.toString() + " ; if");
+
+  // Then
+  if (then) {
+    evaluateStmt(then);
+  }
+  emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
+  emit("br " + RTEMPs + " ; if");
+
+  // Else
+  emit("label" + std::to_string(elseLabel) + ":");
+  if (elseStmt) {
+    evaluateStmt(elseStmt);
+  }
+  emit("label" + std::to_string(endLabel) + ":");
+
   return Location();
 }
 
@@ -325,7 +462,7 @@ bool RsrccVisitor::evaluateFunctionDecl(FunctionDecl *decl) {
            DI != declStmt->decl_end(); ++DI) {
         if (isa<VarDecl>(*DI)) {
           numLocals++;
-          evaluateVarDecl(cast<VarDecl>(*DI));
+          // evaluateVarDecl(cast<VarDecl>(*DI));
         }
       }
     }
@@ -353,12 +490,7 @@ bool RsrccVisitor::evaluateFunctionDecl(FunctionDecl *decl) {
   // Emit body
   for (Stmt::child_iterator i = body->child_begin(); i != body->child_end();
        ++i) {
-    if (Expr *expr = dyn_cast<Expr>(*i)) {
-      evaluateExpression(expr);
-    }
-    if (ReturnStmt *stmt = dyn_cast<ReturnStmt>(*i)) {
-      evaluateReturnStmt(stmt);
-    }
+    evaluateStmt(*i);
   }
 
   // Emit epilog

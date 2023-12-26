@@ -51,16 +51,16 @@ public:
 
   //   bool VisitFunctionDecl(clang::FunctionDecl *Declaration);
 
-//   bool VisitVarDecl(clang::VarDecl *Declaration);
+  //   bool VisitVarDecl(clang::VarDecl *Declaration);
 
   //   bool VisitDecl(clang::Decl *Declaration);
 
   //   bool VisitBinaryOperator(clang::BinaryOperator *op);
 
-//   bool VisitReturnStmt(clang::ReturnStmt *stmt);
+  //   bool VisitReturnStmt(clang::ReturnStmt *stmt);
 
   bool VisitTranslationUnitDecl(clang::TranslationUnitDecl *decl);
-//   bool VisitFunctionDecl(clang::FunctionDecl *decl);
+  //   bool VisitFunctionDecl(clang::FunctionDecl *decl);
 
 private:
   clang::ASTContext *Context;
@@ -78,13 +78,17 @@ private:
 
   bool evaluateFunctionDecl(clang::FunctionDecl *decl);
   Location evaluateCallExpr(clang::CallExpr *expr);
+  Location evaluateStmt(clang::Stmt *stmt);
   Location evaluateExpression(clang::Expr *expr);
   Location evaluateDeclRefExpr(clang::DeclRefExpr *expr);
   Location evaluateIntegerLiteral(clang::IntegerLiteral *expr);
   Location evaluateVarDecl(clang::VarDecl *decl);
   Location evaluateParmVarDecl(clang::ParmVarDecl *decl);
   Location evaluateReturnStmt(clang::ReturnStmt *stmt);
+  Location evaluateIfStmt(clang::IfStmt *stmt);
   Location evaluateBinaryOperator(clang::BinaryOperator *op);
   Location evaluateCompute(clang::BinaryOperator *op);
+  std::string compareHelper(std::string_view opStr);
+  Location evaluateCompare(clang::BinaryOperator *op);
   Location evaluateAssign(clang::BinaryOperator *op);
 };
