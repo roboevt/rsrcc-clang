@@ -5,18 +5,43 @@
 
 class RsrccVisitor : public clang::RecursiveASTVisitor<RsrccVisitor> {
 public:
-  struct Location {
-    int regNum, stackOffset;
+  class Register {
+    static int nextReg;
+    int reg;
 
-    constexpr bool isReg() const { return regNum != -1; }
-    constexpr bool isStack() const { return stackOffset != -1; }
-    constexpr bool isAllocated() const { return isReg() || isStack(); }
+  public:
+    Register() : reg(-1) {}
+    Register(int reg) : reg(reg) {}
+    bool allocate() {
+      if (nextReg >= RESERVED_REGS) {
+        reg = nextReg--;
+        return true;
+      }
+      return false;
+    }
+    bool isAllocated() const { return reg != -1; }
+    static bool regAvailable() { return nextReg >= RESERVED_REGS; }
+    operator int() const { return reg; }
+    ~Register() { if(reg != -1) nextReg++; }
+    Register(const Register &other) = delete;
+    Register &operator=(const Register &other) = delete;
+    Register &operator=(const Register &&other) = delete;
+    Register(Register &&other) = default;
+    Register &operator=(Register &&other) = default;
+  };
+  struct Location {
+    std::shared_ptr<Register> reg;
+    int stackOffset;
+
+    bool isReg() const { return reg->isAllocated(); }
+    bool isStack() const { return stackOffset != -1; }
+    bool isAllocated() const { return isReg() || isStack(); }
 
     std::string toString() const;
 
-    constexpr Location() : regNum(-1), stackOffset(-1) {}
-    constexpr Location(int regNum, int stackOffset)
-        : regNum(regNum), stackOffset(stackOffset) {}
+    Location() : reg(std::make_shared<Register>()), stackOffset(-1) {}
+    Location(int reg, int stackOffset)
+        : reg(std::make_shared<Register>(reg)), stackOffset(stackOffset) {}
 
     static constexpr int esp = 1;
     static constexpr int ebp = 2;
@@ -26,6 +51,7 @@ public:
     static const Location EBP;
     static const Location EAX;
     static const Location RTEMP;
+    static Location INVALID;
   };
 
   struct SymTabEntry {
