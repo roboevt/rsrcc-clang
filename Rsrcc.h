@@ -103,6 +103,7 @@ private:
   Location evaluateWhileStmt(clang::WhileStmt *stmt);
   Location evaluateForStmt(clang::ForStmt *stmt);
   Location evaluateBinaryOperator(clang::BinaryOperator *op);
+  Location evaluateUnaryOperator(clang::UnaryOperator *op);
   Location evaluateCompute(clang::BinaryOperator *op);
   std::string compareHelper(std::string_view opStr);
   Location evaluateCompare(clang::BinaryOperator *op);

@@ -30,9 +30,7 @@ void push(int reg) {
   emit("st r" + std::to_string(reg) + ", 0(" + ESPs + ") ; push1");
 }
 
-void push(std::shared_ptr<RsrccVisitor::Register> reg) {
-  push(*reg);
-}
+void push(std::shared_ptr<RsrccVisitor::Register> reg) { push(*reg); }
 
 void push(RsrccVisitor::Location reg) {
   if (!reg.isReg()) {
@@ -50,9 +48,7 @@ void pop(int reg) {
   // emit("st " + RTEMPs + ", -4(" + ESPs + ") ; pop clear1");
 }
 
-void pop(std::shared_ptr<RsrccVisitor::Register> reg) {
-  pop(*reg);
-}
+void pop(std::shared_ptr<RsrccVisitor::Register> reg) { pop(*reg); }
 
 void pop(RsrccVisitor::Location reg) {
   if (!reg.isReg()) {
@@ -63,12 +59,13 @@ void pop(RsrccVisitor::Location reg) {
 }
 
 void ret() {
-  auto& reg = RsrccVisitor::Location::RTEMP;
+  auto &reg = RsrccVisitor::Location::RTEMP;
   pop(reg.reg);
   emit("br " + reg.toString() + " ; ret");
 }
 
-void move(const RsrccVisitor::Location& dest, const RsrccVisitor::Location& src) {
+void move(const RsrccVisitor::Location &dest,
+          const RsrccVisitor::Location &src) {
   if (dest.isReg()) {
     if (src.isReg()) {
       emit("addi " + dest.toString() + ", " + src.toString() + ", 0; mov");
@@ -152,8 +149,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
 
   debug("VarDecl: " + name + " at " + entry.location.toString());
 
-  if(Declaration->hasInit()) {
-    Expr* init = Declaration->getInit();
+  if (Declaration->hasInit()) {
+    Expr *init = Declaration->getInit();
     Location initLoc = evaluateExpression(init);
     move(entry.location, initLoc);
   }
@@ -179,7 +176,6 @@ RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl) {
   symTab[name] = entry;
 
   debug("ParmVarDecl: " + name + " at " + entry.location.toString());
-  
 
   return entry.location;
 }
@@ -209,7 +205,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateDeclRefExpr(DeclRefExpr *expr) {
   std::string funcName = funcDecl->getNameAsString();
   name = funcName + "::" + name;
 
-  SymTabEntry& entry = symTab[name];
+  SymTabEntry &entry = symTab[name];
   debug("evaluateDeclRefExpr: " + name + " at " + entry.location.toString());
   if (entry.location.isAllocated()) {
     return entry.location;
@@ -317,6 +313,9 @@ RsrccVisitor::Location RsrccVisitor::evaluateExpression(Expr *expr) {
   if (BinaryOperator *binaryOperator = dyn_cast<BinaryOperator>(expr)) {
     return evaluateBinaryOperator(binaryOperator);
   }
+  if (UnaryOperator *unaryOperator = dyn_cast<UnaryOperator>(expr)) {
+    return evaluateUnaryOperator(unaryOperator);
+  }
   if (ReturnStmt *returnStmt = dyn_cast<ReturnStmt>(expr)) {
     return evaluateReturnStmt(returnStmt);
   }
@@ -348,17 +347,60 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
     return Location();
   }
 
+  Location destLoc;
+  if(op->isAssignmentOp()) {
+    destLoc = lhsLoc;
+  } else {
+    destLoc = allocateLoc();
+  }
+
   if (opStr == "+") {
-    emit("add " + lhsLoc.toString() + ", " + lhsLoc.toString() + ", " +
+    emit("add " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
          rhsLoc.toString());
   } else if (opStr == "-") {
-    emit("sub " + lhsLoc.toString() + ", " + lhsLoc.toString() + ", " +
+    emit("sub " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
          rhsLoc.toString());
+  } else if (opStr == "<<") {
+    emit("shl " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == ">>") {
+    emit("shr " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "&") {
+    emit("and " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "|") {
+    emit("or " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "^") {  // no xor instruction
+    // TODO
+    llvm::errs() << "Error: unsupported compute: " << opStr << "\n";
+  } else if (opStr == "+=") {
+    emit("add " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "-=") {
+    emit("sub " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "<<=") {
+    emit("shl " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == ">>=") {
+    emit("shr " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "&=") {
+    emit("and " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "|=") {
+    emit("or " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
+         rhsLoc.toString());
+  } else if (opStr == "^=") {  // no xor instruction
+    // TODO
+    llvm::errs() << "Error: unsupported compute: " << opStr << "\n";
   } else {
     llvm::errs() << "Error: unsupported compute: " << opStr << "\n";
   }
 
-  return lhsLoc;
+  return destLoc;
 }
 
 std::string RsrccVisitor::compareHelper(std::string_view opStr) {
@@ -421,6 +463,69 @@ RsrccVisitor::evaluateBinaryOperator(BinaryOperator *op) {
   }
 
   llvm::errs() << "Error: unsupported binary operator: " << opStr << "\n";
+  return Location();
+}
+
+RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
+  std::string_view opStr = op->getOpcodeStr(op->getOpcode());
+  if(opStr == "++") {
+    if(op->isPrefix()) {
+      Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+      Location loc = evaluateExpression(expr);
+      emit("addi " + loc.toString() + ", " + loc.toString() + ", 1 ; pre++");
+      return loc;
+    } else if(op->isPostfix()) {
+      // TODO
+      llvm::errs() << "Error: unsupported unary operator: " << opStr << " (use prefix)\n";
+      return Location::INVALID;
+    }
+  }
+
+  if(opStr == "--") {
+    if(op->isPrefix()) {
+      Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+      Location loc = evaluateExpression(expr);
+      emit("addi " + loc.toString() + ", " + loc.toString() + ", -1 ; pre--");
+      return loc;
+    } else if(op->isPostfix()) {
+      // TODO
+      llvm::errs() << "Error: unsupported unary operator: " << opStr << " (use prefix)\n";
+      return Location::INVALID;
+    }
+  }
+  
+  if(opStr == "-") {
+    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+    Location loc = evaluateExpression(expr);
+    emit("neg " + loc.toString() + ", " + loc.toString() + " ; neg");
+    return loc;
+  }
+
+  if(opStr == "~") {
+    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+    Location loc = evaluateExpression(expr);
+    emit("not " + loc.toString() + ", " + loc.toString() + " ; not");
+    return loc;
+  }
+
+  if(opStr == "!") {
+    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+    Location loc = evaluateExpression(expr);
+    emit("lar " + RTEMPs + ", label" + std::to_string(currentLabel));
+    emit("brzr " + RTEMPs + ", " + loc.toString() + " ; bang!");
+    emit("lar " + loc.toString() + ", 0");
+    emit("lar " + RTEMPs + ", label" + std::to_string(currentLabel + 1));
+    emit("br " + RTEMPs + " ; bang!");
+    emit("label" + std::to_string(currentLabel) + ":");
+    emit("lar " + loc.toString() + ", 1");
+    emit("label" + std::to_string(currentLabel + 1) + ":");
+    currentLabel += 2;
+    return loc;
+  }
+
+  // TODO & and * (TODO pointers (TODO types other than int))
+
+  llvm::errs() << "Error: unsupported unary operator: " << opStr << "\n";
   return Location();
 }
 
@@ -534,8 +639,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
   debug("evaluateCallExpr: " + name);
 
   // Push caller saved registers (all for now) that are used (slow!)
-  for(int i = 1; i < 32; i++) {
-    if(Register::isUsed(i)) {
+  for (int i = 1; i < 32; i++) {
+    if (Register::isUsed(i)) {
       push(i);
     }
   }
@@ -560,8 +665,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
        std::to_string(4 * expr->getNumArgs()) + " ; clean stack");
 
   // Pop caller saved registers (all for now) that are used
-  for(int i = 31; i > 0; i--) {
-    if(Register::isUsed(i)) {
+  for (int i = 31; i > 0; i--) {
+    if (Register::isUsed(i)) {
       pop(i);
     }
   }
