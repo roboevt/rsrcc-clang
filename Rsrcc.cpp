@@ -119,7 +119,7 @@ void RsrccVisitor::debug(std::string str) {
 
 RsrccVisitor::Location RsrccVisitor::allocateLoc() {
   Location loc;
-  if (Register::regAvailable()) {
+  if (Register::anyRegAvailable()) {
     loc.reg->allocate();
   } else {
     // TODO allocate on stack
@@ -486,6 +486,13 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
 
   debug("evaluateCallExpr: " + name);
 
+  // Push caller saved registers (all for now) that are used (slow!)
+  for(int i = 1; i < 32; i++) {
+    if(Register::isUsed(i)) {
+      push(i);
+    }
+  }
+
   // Push arguments
   std::vector<Location> argLocs;
 
@@ -504,6 +511,13 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
   // Clean stack (args)
   emit("addi " + ESPs + ", " + ESPs + ", " +
        std::to_string(4 * expr->getNumArgs()) + " ; clean stack");
+
+  // Pop caller saved registers (all for now) that are used
+  for(int i = 31; i > 0; i--) {
+    if(Register::isUsed(i)) {
+      pop(i);
+    }
+  }
 
   return RsrccVisitor::Location::EAX;
 }

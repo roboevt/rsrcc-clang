@@ -20,7 +20,8 @@ public:
       return false;
     }
     bool isAllocated() const { return reg != -1; }
-    static bool regAvailable() { return nextReg >= RESERVED_REGS; }
+    static bool isUsed(int reg) { return reg > nextReg; }
+    static bool anyRegAvailable() { return nextReg >= RESERVED_REGS; }
     operator int() const { return reg; }
     ~Register() { if(reg != -1) nextReg++; }
     Register(const Register &other) = delete;
@@ -60,7 +61,7 @@ public:
     RsrccVisitor::Location location;
   };
 
-  bool DEBUG = true;
+  bool DEBUG = false;
 
   static constexpr int RESERVED_REGS = 5;
   static constexpr int MAX_REGS = 31;
