@@ -205,6 +205,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateStmt(Stmt *stmt) {
     return evaluateReturnStmt(stmt2);
   } if(IfStmt* stmt2 = dyn_cast<IfStmt>(stmt)) {
     return evaluateIfStmt(stmt2);
+  } if(WhileStmt* stmt2 = dyn_cast<WhileStmt>(stmt)) {
+    return evaluateWhileStmt(stmt2);
   } if(DeclStmt* stmt2 = dyn_cast<DeclStmt>(stmt)) {
     for (DeclStmt::decl_iterator DI = stmt2->decl_begin();
            DI != stmt2->decl_end(); ++DI) {
@@ -402,6 +404,32 @@ RsrccVisitor::Location RsrccVisitor::evaluateIfStmt(IfStmt *stmt) {
   return Location();
 }
 
+RsrccVisitor::Location RsrccVisitor::evaluateWhileStmt(WhileStmt *stmt) {
+  Expr *cond = stmt->getCond()->IgnoreParenImpCasts();
+  Stmt *body = stmt->getBody();
+
+  debug("evaluateWhileStmt");
+
+  int condLabel = currentLabel++;
+  int endLabel = currentLabel++;
+
+  emit("label" + std::to_string(condLabel) + ":");
+  Location condLoc = evaluateExpression(cond);
+  emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
+  emit("brzr " + RTEMPs + ", " + condLoc.toString() + " ; while");
+
+  // Body
+  if (body) {
+    evaluateStmt(body);
+  }
+  emit("lar " + RTEMPs + ", label" + std::to_string(condLabel));
+  emit("br " + RTEMPs + " ; while");
+
+  emit("label" + std::to_string(endLabel) + ":");
+
+  return Location();
+}
+
 RsrccVisitor::Location RsrccVisitor::evaluateReturnStmt(ReturnStmt *stmt) {
   Expr *expr = stmt->getRetValue()->IgnoreParenImpCasts();
   Location loc = evaluateExpression(expr);
@@ -417,9 +445,14 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
   debug("evaluateCallExpr: " + name);
 
   // Push arguments
-  for (Expr *arg : expr->arguments()) {
+  std::vector<Location> argLocs;
+
+  for(Expr* arg : expr->arguments()) {
     Location loc = evaluateExpression(arg);
-    push(loc);
+    argLocs.push_back(loc);
+  }
+  for(std::vector<Location>::reverse_iterator i = argLocs.rbegin(); i != argLocs.rend(); ++i) {
+    push(*i);
   }
 
   // Call function

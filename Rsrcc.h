@@ -86,6 +86,7 @@ private:
   Location evaluateParmVarDecl(clang::ParmVarDecl *decl);
   Location evaluateReturnStmt(clang::ReturnStmt *stmt);
   Location evaluateIfStmt(clang::IfStmt *stmt);
+  Location evaluateWhileStmt(clang::WhileStmt *stmt);
   Location evaluateBinaryOperator(clang::BinaryOperator *op);
   Location evaluateCompute(clang::BinaryOperator *op);
   std::string compareHelper(std::string_view opStr);
