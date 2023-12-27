@@ -152,6 +152,12 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
 
   debug("VarDecl: " + name + " at " + entry.location.toString());
 
+  if(Declaration->hasInit()) {
+    Expr* init = Declaration->getInit();
+    Location initLoc = evaluateExpression(init);
+    move(entry.location, initLoc);
+  }
+
   return entry.location;
 }
 
@@ -243,6 +249,9 @@ RsrccVisitor::Location RsrccVisitor::evaluateStmt(Stmt *stmt) {
   }
   if (WhileStmt *stmt2 = dyn_cast<WhileStmt>(stmt)) {
     return evaluateWhileStmt(stmt2);
+  }
+  if (ForStmt *stmt2 = dyn_cast<ForStmt>(stmt)) {
+    return evaluateForStmt(stmt2);
   }
   if (DeclStmt *stmt2 = dyn_cast<DeclStmt>(stmt)) {
     for (DeclStmt::decl_iterator DI = stmt2->decl_begin();
@@ -470,6 +479,44 @@ RsrccVisitor::Location RsrccVisitor::evaluateWhileStmt(WhileStmt *stmt) {
   emit("label" + std::to_string(endLabel) + ":");
 
   return Location();
+}
+
+RsrccVisitor::Location RsrccVisitor::evaluateForStmt(ForStmt *stmt) {
+  Stmt *init = stmt->getInit();
+  Expr *cond = stmt->getCond();
+  Expr *inc = stmt->getInc();
+  Stmt *body = stmt->getBody();
+
+  debug("evaluateForStmt");
+
+  int condLabel = currentLabel++;
+  int endLabel = currentLabel++;
+
+  // Init
+  if (init) {
+    evaluateStmt(init);
+  }
+  emit("label" + std::to_string(condLabel) + ":");
+  // Cond
+  if (cond) {
+    Location condLoc = evaluateExpression(cond);
+    emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
+    emit("brzr " + RTEMPs + ", " + condLoc.toString() + " ; for");
+  }
+  // Body
+  if (body) {
+    evaluateStmt(body);
+  }
+  // Inc
+  if (inc) {
+    evaluateStmt(inc);
+  }
+  emit("lar " + RTEMPs + ", label" + std::to_string(condLabel));
+  emit("br " + RTEMPs + " ; for");
+
+  emit("label" + std::to_string(endLabel) + ":");
+
+  return Location::INVALID;
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateReturnStmt(ReturnStmt *stmt) {

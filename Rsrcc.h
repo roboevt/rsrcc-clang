@@ -23,7 +23,10 @@ public:
     static bool isUsed(int reg) { return reg > nextReg; }
     static bool anyRegAvailable() { return nextReg >= RESERVED_REGS; }
     operator int() const { return reg; }
-    ~Register() { if(reg != -1) nextReg++; }
+    ~Register() {
+      if (reg != -1)
+        nextReg++;
+    }
     Register(const Register &other) = delete;
     Register &operator=(const Register &other) = delete;
     Register &operator=(const Register &&other) = delete;
@@ -98,6 +101,7 @@ private:
   Location evaluateReturnStmt(clang::ReturnStmt *stmt);
   Location evaluateIfStmt(clang::IfStmt *stmt);
   Location evaluateWhileStmt(clang::WhileStmt *stmt);
+  Location evaluateForStmt(clang::ForStmt *stmt);
   Location evaluateBinaryOperator(clang::BinaryOperator *op);
   Location evaluateCompute(clang::BinaryOperator *op);
   std::string compareHelper(std::string_view opStr);
