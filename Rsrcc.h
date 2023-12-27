@@ -47,20 +47,7 @@ public:
 
   explicit RsrccVisitor(clang::ASTContext *Context) : Context(Context) {}
 
-  //   bool VisitCXXRecordDecl(clang::CXXRecordDecl *Declaration);
-
-  //   bool VisitFunctionDecl(clang::FunctionDecl *Declaration);
-
-  //   bool VisitVarDecl(clang::VarDecl *Declaration);
-
-  //   bool VisitDecl(clang::Decl *Declaration);
-
-  //   bool VisitBinaryOperator(clang::BinaryOperator *op);
-
-  //   bool VisitReturnStmt(clang::ReturnStmt *stmt);
-
   bool VisitTranslationUnitDecl(clang::TranslationUnitDecl *decl);
-  //   bool VisitFunctionDecl(clang::FunctionDecl *decl);
 
 private:
   clang::ASTContext *Context;
@@ -70,9 +57,6 @@ private:
   void debug(std::string);
 
   void call(std::string funcName);
-
-  //   bool visitAssign(clang::BinaryOperator *op);
-  //   bool visitCompute(clang::BinaryOperator *op);
 
   Location allocateLoc();
 

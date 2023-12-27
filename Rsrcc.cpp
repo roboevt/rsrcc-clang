@@ -119,6 +119,14 @@ RsrccVisitor::Location RsrccVisitor::allocateLoc() {
 
 RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
   std::string name = Declaration->getNameAsString();
+  // Get parent function name
+  FunctionDecl *funcDecl = dyn_cast<FunctionDecl>(Declaration->getDeclContext());
+  if(!funcDecl) {
+    llvm::errs() << "Error: " << name << " is not in a function\n";
+    return Location();
+  }
+  std::string funcName = funcDecl->getNameAsString();
+  name = funcName + "::" + name;
 
   if (symTab.find(name) != symTab.end()) {
     llvm::errs() << "Error: " << name << " is already declared\n";
@@ -137,6 +145,10 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
 
 RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl) {
   std::string name = decl->getNameAsString();
+  // Get parent function name
+  FunctionDecl *funcDecl = dyn_cast<FunctionDecl>(decl->getDeclContext());
+  std::string funcName = funcDecl->getNameAsString();
+  name = funcName + "::" + name;
 
   if (symTab.find(name) != symTab.end()) {
     llvm::errs() << "Error: " << name << " is already declared\n";
@@ -169,6 +181,14 @@ RsrccVisitor::Location RsrccVisitor::evaluateAssign(BinaryOperator *op) {
 RsrccVisitor::Location RsrccVisitor::evaluateDeclRefExpr(DeclRefExpr *expr) {
   ValueDecl *decl = expr->getDecl();
   std::string name = decl->getNameAsString();
+  // Get parent function name
+  FunctionDecl *funcDecl = dyn_cast<FunctionDecl>(decl->getDeclContext());
+  if(!funcDecl) {
+    llvm::errs() << "Error: " << name << " is not in a function\n";
+    return Location();
+  }
+  std::string funcName = funcDecl->getNameAsString();
+  name = funcName + "::" + name;
 
   SymTabEntry entry = symTab[name];
   debug("evaluateDeclRefExpr: " + name + " at " + entry.location.toString());
