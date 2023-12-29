@@ -6,18 +6,23 @@
 class RsrccVisitor : public clang::RecursiveASTVisitor<RsrccVisitor> {
 public:
   class Register {
+    public:
     static int nextReg;
     int reg;
 
   public:
     Register() : reg(-1) {}
     Register(int reg) : reg(reg) {}
-    bool allocate() {
-      if (nextReg >= RESERVED_REGS) {
+    bool allocReg() {
+      if (nextReg >= RESERVED_REGS && reg == -1) {
         reg = nextReg--;
-        return true;
       }
-      return false;
+      return reg != -1;
+    }
+    void deallocReg() {
+      if (reg != -1)
+        nextReg++;
+      reg = -1;
     }
     bool isAllocated() const { return reg != -1; }
     static bool isUsed(int reg) { return reg > nextReg; }
@@ -42,6 +47,8 @@ public:
     bool isAllocated() const { return isReg() || isStack(); }
 
     std::string toString() const;
+    std::string toRegString() const;
+    std::string toStackString() const;
 
     Location() : reg(std::make_shared<Register>()), stackOffset(-1) {}
     Location(int reg, int stackOffset)
@@ -74,6 +81,8 @@ public:
   int currentlyAllocatedRegs = RESERVED_REGS;
   int currentStackOffset = 0;
   int currentLabel = 0;
+  int currentFuncTotalLocals = 0;
+  int currentFuncAllocatedLocals = 0;
 
   explicit RsrccVisitor(clang::ASTContext *Context) : Context(Context) {}
 
@@ -98,6 +107,7 @@ private:
   Location evaluateIntegerLiteral(clang::IntegerLiteral *expr);
   Location evaluateVarDecl(clang::VarDecl *decl);
   Location evaluateParmVarDecl(clang::ParmVarDecl *decl);
+  Location evaluateParmVarDecl(clang::ParmVarDecl *decl, int stackOffset);
   Location evaluateReturnStmt(clang::ReturnStmt *stmt);
   Location evaluateIfStmt(clang::IfStmt *stmt);
   Location evaluateWhileStmt(clang::WhileStmt *stmt);
