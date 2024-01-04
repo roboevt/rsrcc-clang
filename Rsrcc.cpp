@@ -225,18 +225,28 @@ RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl,
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateAssign(BinaryOperator *op) {
-  Expr *lhs = op->getLHS()->IgnoreParenImpCasts();
+  Expr *lhs = op->getLHS();
+  bool lvalueToRvalue = isa<ImplicitCastExpr>(lhs);
   Expr *rhs = op->getRHS()->IgnoreParenImpCasts();
 
-  Location lhsLoc = evaluateExpression(lhs);
-
-  if (IntegerLiteral *rhsInt = dyn_cast<IntegerLiteral>(rhs)) {
-    emit("addi " + lhsLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         std::to_string(rhsInt->getValue().getSExtValue()) + " ; assign");
-    return lhsLoc;
+  Location lhsLoc;
+  if (lvalueToRvalue) {  // We want to load the value of the lvalue
+    lhsLoc = evaluateExpression(lhs);  // Location to store to
+  } else {  // We want to store to the value of the rvalue
+    lhsLoc = evaluateExpression(lhs);  // Location of location of lvalue to store to (assuming pointer, idk other cases)
   }
 
+  // Premature optimization
+  // if (IntegerLiteral *rhsInt = dyn_cast<IntegerLiteral>(rhs)) {
+  //   emit("addi " + lhsLoc.toString() + ", " + lhsLoc.toString() + ", " +
+  //        std::to_string(rhsInt->getValue().getSExtValue()) + " ; assign");
+  // } else {
+  //   Location rhsLoc = evaluateExpression(rhs);
+  //   move(lhsLoc, rhsLoc);
+  // }
+
   Location rhsLoc = evaluateExpression(rhs);
+
   move(lhsLoc, rhsLoc);
 
   return lhsLoc;
@@ -248,7 +258,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateDeclRefExpr(DeclRefExpr *expr) {
   // Get parent function name
   FunctionDecl *funcDecl = dyn_cast<FunctionDecl>(decl->getDeclContext());
   if (!funcDecl) {
-    llvm::errs() << "Error: " << name << " is not in a function\n";
+    llvm::errs() << "Error: " << name
+                 << " is not in a function, globals not supported yet.\n";
     return Location::INVALID;
   }
   std::string funcName = funcDecl->getNameAsString();
@@ -623,7 +634,30 @@ RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
     return loc;
   }
 
-  // TODO & and * (TODO pointers (TODO types other than int))
+  if (opStr == "&") {
+    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+    Location loc = evaluateExpression(expr);
+    if (loc.isStack()) { // TODO assert?
+      emit("la " + RTEMPs + ", " + loc.toString() + " ; addr");
+      return Location::RTEMP;
+    } else {
+      llvm::errs() << "Error: & requires stack location\n";
+      return Location::INVALID;
+    }
+    return loc;
+  }
+
+  if (opStr == "*") {
+    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
+    Location loc = evaluateExpression(expr);
+    if (loc.isStack()) {
+      emit("la " + RTEMPs + ", " + loc.toString() + " ; deref");
+      return loc;
+    } else {
+      llvm::errs() << "Error: deref requires stack location\n";
+      return Location::INVALID;
+    }
+  }
 
   llvm::errs() << "Error: unsupported unary operator: " << opStr << "\n";
   return Location();

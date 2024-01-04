@@ -38,6 +38,7 @@ public:
     Register(Register &&other) = default;
     Register &operator=(Register &&other) = default;
   };
+  
   struct Location {
     std::shared_ptr<Register> reg;
     int stackOffset;
