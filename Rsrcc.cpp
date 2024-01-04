@@ -14,7 +14,7 @@ const RsrccVisitor::Location RsrccVisitor::Location::RTEMP{
     RsrccVisitor::Location::rtemp, -1};
 RsrccVisitor::Location RsrccVisitor::Location::INVALID{-1, -1};
 
-int RsrccVisitor::Register::nextReg = MAX_REGS;
+std::array<bool, 31 - 5> RsrccVisitor::Register::usedRegs = {false};
 
 namespace {
 
@@ -41,6 +41,29 @@ void move(const RsrccVisitor::Location &dest,
            src.toString());
       emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", " +
            dest.toString());
+    }
+  }
+}
+
+void moveToPointer(const RsrccVisitor::Location &destAddr,
+                   const RsrccVisitor::Location &src) {
+  if (destAddr.isReg()) {
+    if (src.isReg()) {
+      emit("st " + src.toString() + ", 0(" + destAddr.toString() + ") ; mov");
+    } else {
+      emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
+           src.toString() + " ; mov");
+      emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", 0(" +
+           destAddr.toString() + ") ; mov");
+    }
+  } else { // storing to stack
+    if (src.isReg()) {
+      emit("st " + src.toString() + ", " + destAddr.toString() + " ; mov");
+    } else {
+      emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
+           src.toString() + " ; mov");
+      emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", " +
+           destAddr.toString() + " ; mov");
     }
   }
 }
@@ -173,6 +196,16 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
   if (Declaration->hasInit()) {
     Expr *init = Declaration->getInit();
     Location initLoc = evaluateExpression(init);
+    if (isa<ImplicitCastExpr>(init)) { // LvalueToRvalue
+      if (initLoc.isStack()) {
+        initLoc.reg->allocReg();
+        emit("ld " + initLoc.toRegString() + ", " + initLoc.toStackString() +
+             " ; init");
+      } else {
+        emit("ld " + initLoc.toRegString() + ", 0(" + initLoc.toString() +
+             ") ; init");
+      }
+    }
     move(entry.location, initLoc);
   }
 
@@ -226,14 +259,13 @@ RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl,
 
 RsrccVisitor::Location RsrccVisitor::evaluateAssign(BinaryOperator *op) {
   Expr *lhs = op->getLHS();
-  bool lvalueToRvalue = isa<ImplicitCastExpr>(lhs);
+  bool LValueToRValue = isa<ImplicitCastExpr>(lhs);
   Expr *rhs = op->getRHS()->IgnoreParenImpCasts();
 
-  Location lhsLoc;
-  if (lvalueToRvalue) {  // We want to load the value of the lvalue
-    lhsLoc = evaluateExpression(lhs);  // Location to store to
-  } else {  // We want to store to the value of the rvalue
-    lhsLoc = evaluateExpression(lhs);  // Location of location of lvalue to store to (assuming pointer, idk other cases)
+  Location lhsLoc = evaluateExpression(lhs);
+  Location rhsLoc = evaluateExpression(rhs);
+  if (isa<ImplicitCastExpr>(rhs)) { // LvalueToRvalue
+    emit("ld " + rhsLoc.toString() + ", " + rhsLoc.toString() + " ; assign");
   }
 
   // Premature optimization
@@ -245,7 +277,16 @@ RsrccVisitor::Location RsrccVisitor::evaluateAssign(BinaryOperator *op) {
   //   move(lhsLoc, rhsLoc);
   // }
 
-  Location rhsLoc = evaluateExpression(rhs);
+  if (lhsLoc.isStack()) {
+    lhsLoc.reg->allocReg();
+    emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+         " ; assign");
+    lhsLoc.reg->deallocReg();
+  }
+  if (!LValueToRValue) {
+    // Should move rhs to address in lhsLoc
+    moveToPointer(lhsLoc, rhsLoc);
+  }
 
   move(lhsLoc, rhsLoc);
 
@@ -388,8 +429,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
 
   if (!lhsRegOrig) {
     if (!lhsLoc.reg->allocReg()) {
-      llvm::errs() << "Error: compute requires registers, at "
-                   << Register::nextReg << "\n";
+      llvm::errs() << "Error: compute requires registers\n";
       return Location();
     }
     emit("ld " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
@@ -398,8 +438,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
 
   if (!rhsRegOrig) {
     if (!rhsLoc.reg->allocReg()) {
-      llvm::errs() << "Error: compute requires registers, at "
-                   << Register::nextReg << "\n";
+      llvm::errs() << "Error: compute requires registers\n";
       return Location();
     }
     emit("ld " + rhsLoc.toRegString() + ", " + rhsLoc.toStackString() +
@@ -651,8 +690,9 @@ RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
     Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
     Location loc = evaluateExpression(expr);
     if (loc.isStack()) {
-      emit("la " + RTEMPs + ", " + loc.toString() + " ; deref");
-      return loc;
+      emit("la " + RTEMPs + ", " + loc.toStackString() + " ; deref");
+      emit("ld " + RTEMPs + ", 0(" + RTEMPs + ") ; deref");
+      return Location::RTEMP;
     } else {
       llvm::errs() << "Error: deref requires stack location\n";
       return Location::INVALID;
@@ -776,7 +816,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
   debug("evaluateCallExpr: " + name);
 
   // Push caller saved registers (all for now) that are used (slow!)
-  for (int i = 1; i < 32; i++) {
+  for (int i = 1; i < MAX_REGS; i++) {
     if (Register::isUsed(i)) {
       push(i);
       debug("push caller saved register: " + std::to_string(i));

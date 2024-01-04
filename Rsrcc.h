@@ -6,31 +6,42 @@
 class RsrccVisitor : public clang::RecursiveASTVisitor<RsrccVisitor> {
 public:
   class Register {
-    public:
-    static int nextReg;
+  public:
+    static std::array<bool, 31 - 5> usedRegs; // TODO: make this automatic
     int reg;
 
   public:
     Register() : reg(-1) {}
     Register(int reg) : reg(reg) {}
     bool allocReg() {
-      if (nextReg >= RESERVED_REGS && reg == -1) {
-        reg = nextReg--;
-      }
-      return reg != -1;
+      if (isAllocated())
+        return false;
+      auto nextReg = std::find(usedRegs.begin(), usedRegs.end(), false);
+      if (nextReg == usedRegs.end())
+        return false;
+      reg = nextReg - usedRegs.begin() + RESERVED_REGS;
+      return true;
     }
     void deallocReg() {
-      if (reg != -1)
-        nextReg++;
+      if (!isAllocated())
+        return;
+      usedRegs[reg - RESERVED_REGS] = false;
       reg = -1;
     }
     bool isAllocated() const { return reg != -1; }
-    static bool isUsed(int reg) { return reg > nextReg; }
-    static bool anyRegAvailable() { return nextReg >= RESERVED_REGS; }
+    static bool isUsed(int reg) { 
+      if(reg >= RESERVED_REGS && reg < MAX_REGS)
+        return usedRegs[reg - RESERVED_REGS];
+      return false;
+      }
+    static bool anyRegAvailable() {
+      return std::find(usedRegs.begin(), usedRegs.end(), false) !=
+             usedRegs.end();
+    }
     operator int() const { return reg; }
     ~Register() {
-      if (reg != -1)
-        nextReg++;
+      if (isAllocated())
+        deallocReg();
     }
     Register(const Register &other) = delete;
     Register &operator=(const Register &other) = delete;
@@ -38,7 +49,7 @@ public:
     Register(Register &&other) = default;
     Register &operator=(Register &&other) = default;
   };
-  
+
   struct Location {
     std::shared_ptr<Register> reg;
     int stackOffset;
