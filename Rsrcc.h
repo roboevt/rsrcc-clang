@@ -20,6 +20,7 @@ public:
       if (nextReg == usedRegs.end())
         return false;
       reg = nextReg - usedRegs.begin() + RESERVED_REGS;
+      usedRegs[reg - RESERVED_REGS] = true;
       return true;
     }
     void deallocReg() {
