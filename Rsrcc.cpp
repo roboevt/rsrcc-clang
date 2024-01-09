@@ -4,85 +4,172 @@
 
 using namespace clang;
 
-const RsrccVisitor::Location RsrccVisitor::Location::ESP{
-    RsrccVisitor::Location::esp, -1};
-const RsrccVisitor::Location RsrccVisitor::Location::EBP{
-    RsrccVisitor::Location::ebp, -1};
-const RsrccVisitor::Location RsrccVisitor::Location::EAX{
-    RsrccVisitor::Location::eax, -1};
-const RsrccVisitor::Location RsrccVisitor::Location::RTEMP{
-    RsrccVisitor::Location::rtemp, -1};
-RsrccVisitor::Location RsrccVisitor::Location::INVALID{-1, -1};
+RsrccVisitor::Location RsrccVisitor::Location::INVALID{-1};
+
+const RsrccVisitor::Register RsrccVisitor::Register::ESP{1};
+const RsrccVisitor::Register RsrccVisitor::Register::EBP{2};
+const RsrccVisitor::Register RsrccVisitor::Register::EAX{3};
 
 std::array<bool, 31 - 5> RsrccVisitor::Register::usedRegs = {false};
 
 namespace {
 
-std::string ESPs = RsrccVisitor::Location::ESP.toString();
-std::string EBPs = RsrccVisitor::Location::EBP.toString();
-std::string EAXs = RsrccVisitor::Location::EAX.toString();
-std::string RTEMPs = RsrccVisitor::Location::RTEMP.toString();
+std::string ESPs = RsrccVisitor::Register::ESP.toString();
+std::string EBPs = RsrccVisitor::Register::EBP.toString();
+std::string EAXs = RsrccVisitor::Register::EAX.toString();
+
+std::shared_ptr<RsrccVisitor::Register> ESPp =
+    std::make_shared<RsrccVisitor::Register>(RsrccVisitor::Register::ESP.reg);
+std::shared_ptr<RsrccVisitor::Register> EBPp =
+    std::make_shared<RsrccVisitor::Register>(RsrccVisitor::Register::EBP.reg);
+std::shared_ptr<RsrccVisitor::Register> EAXp =
+    std::make_shared<RsrccVisitor::Register>(RsrccVisitor::Register::EAX.reg);
 
 void emit(std::string str) { llvm::outs() << str << "\n"; }
 
-void move(const RsrccVisitor::Location &dest,
+void move(const RsrccVisitor::Location &dst,
           const RsrccVisitor::Location &src) {
-  if (dest.isReg()) {
+  std::cout << ("; move: " + dst.toString() + " <- " + src.toString())
+            << std::endl;
+  RsrccVisitor::Register reg;
+  if (dst.indirectionLevel > 1) { // move to pointer
+    std::cout << "; move to pointer" << std::endl;
     if (src.isReg()) {
-      emit("addi " + dest.toString() + ", " + src.toString() + ", 0; mov");
-    } else {
-      emit("ld " + dest.toString() + ", " + src.toString());
+      if (dst.isReg()) {
+        emit("st " + src.toString() + ", 0(" + dst.toString() + ") ; mov");
+      } else {
+        emit("ld " + reg.toString() + ", " + dst.toString() + " ; mov");
+        emit("st " + src.toString() + ", 0(" + reg.toString() + ") ; mov");
+      }
+    } else { // src is stack
+      if (dst.isReg()) {
+        emit("ld " + dst.toString() + ", " + src.toString() + " ; mov");
+      } else {
+        emit("ld " + reg.toString() + ", " + src.toString() + " ; mov");
+        emit("st " + reg.toString() + ", 0(" + dst.toString() + ") ; mov");
+      }
     }
-  } else { // storing to stack
-    if (src.isReg()) {
-      emit("st " + src.toString() + ", " + dest.toString());
-    } else {
-      emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
-           src.toString());
-      emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", " +
-           dest.toString());
+  } else { // move to lvalue
+    if (dst.isStack()) {
+      if (src.isReg()) {
+        emit("st " + src.toRegString() + ", " + dst.toStackString() + " ; mov");
+      } else {
+        emit("ld " + reg.toString() + ", " + src.toRegString() + " ; mov");
+        emit("st " + reg.toString() + ", " + dst.toStackString() + " ; mov");
+      }
+    } else { // storing to register
+      if (src.isReg()) {
+        emit("addi " + dst.toRegString() + ", " + src.toRegString() + ", 0 ; mov");
+      } else {
+        emit("ld " + dst.toRegString() + ", " + src.toStackString() + " ; mov");
+      }
     }
   }
 }
 
-void moveToPointer(const RsrccVisitor::Location &destAddr,
-                   const RsrccVisitor::Location &src) {
-  if (destAddr.isReg()) {
-    if (src.isReg()) {
-      emit("st " + src.toString() + ", 0(" + destAddr.toString() + ") ; mov");
-    } else {
-      emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
-           src.toString() + " ; mov");
-      emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", 0(" +
-           destAddr.toString() + ") ; mov");
-    }
-  } else { // storing to stack
-    if (src.isReg()) {
-      emit("st " + src.toString() + ", " + destAddr.toString() + " ; mov");
-    } else {
-      emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
-           src.toString() + " ; mov");
-      emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", " +
-           destAddr.toString() + " ; mov");
-    }
-  }
+
+
+// void moveToAddr(const RsrccVisitor::Location &destAddr,
+//                 const RsrccVisitor::Location &src) {
+//   RsrccVisitor::Register reg;
+//   if (destAddr.isReg()) {
+//     if (src.isReg()) {
+//       emit("st " + src.toString() + ", 0(" + destAddr.toString() + ") ;
+//       mov");
+//     } else {
+//       emit("ld " + reg.toString() + ", " + src.toString() + " ; mov");
+//       emit("st " + reg.toString() + ", 0(" + destAddr.toString() + ") ;
+//       mov");
+//     }
+//   } else { // storing to stack
+//     if (src.isReg()) {
+//       emit("st " + src.toString() + ", " + destAddr.toString() + " ; mov");
+//     } else {
+//       emit("ld " + reg.toString() + ", " + src.toString() + " ; mov");
+//       emit("st " + reg.toString() + ", " + destAddr.toString() + " ; mov");
+//     }
+//   }
+// }
+
+void move(std::shared_ptr<RsrccVisitor::Register> dst,
+          const RsrccVisitor::Location &src) {
+  RsrccVisitor::Location dstLoc = {dst};
+  move(dstLoc, src);
 }
+
+// void move(const RsrccVisitor::Location &dst,
+//           std::shared_ptr<RsrccVisitor::Register> src) {
+//   RsrccVisitor::Location srcLoc = {src};
+//   move(dst, srcLoc);
+// }
+
+// void moveToPointer(const RsrccVisitor::Location &destAddr,
+//                    const RsrccVisitor::Location &src) {
+//   if (destAddr.isReg()) {
+//     if (src.isReg()) {
+//       emit("st " + src.toString() + ", 0(" + destAddr.toString() + ") ;
+//       mov");
+//     } else {
+//       emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
+//            src.toString() + " ; mov");
+//       emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", 0(" +
+//            destAddr.toString() + ") ; mov");
+//     }
+//   } else { // storing to stack
+//     if (src.isReg()) {
+//       emit("st " + src.toString() + ", " + destAddr.toString() + " ; mov");
+//     } else {
+//       emit("ld " + RsrccVisitor::Location::RTEMP.toString() + ", " +
+//            src.toString() + " ; mov");
+//       emit("st " + RsrccVisitor::Location::RTEMP.toString() + ", " +
+//            destAddr.toString() + " ; mov");
+//     }
+//   }
+// }
+
+// RsrccVisitor::Location derefToReg(const RsrccVisitor::Location &loc) {
+//   RsrccVisitor::Location addr;
+//   addr.addr->allocReg();
+//   if (loc.isStack()) {
+//     emit("ld " + addr.toString() + ", " + loc.toString() + " ; deref");
+//   } else {
+//     emit("ld " + addr.toString() + ", 0(" + loc.toString() + ") ; deref");
+//   }
+//   return addr;
+// }
+
+RsrccVisitor::Location deref(const RsrccVisitor::Location &loc) {
+  RsrccVisitor::Location addr;
+  addr.indirectionLevel = loc.indirectionLevel - 1;
+  addr.reg->allocReg();
+  if (loc.isStack()) {
+    emit("ld " + addr.toRegString() + ", " + loc.toStackString() + " ; deref1");
+  } else {
+    emit("ld " + addr.toRegString() + ", 0(" + loc.toRegString() +
+         ") ; deref1");
+  }
+  emit("ld " + addr.toRegString() + ", 0(" + addr.toRegString() + ") ; deref2");
+  return addr;
+}
+
+// RsrccVisitor::Location derefInPlace(const RsrccVisitor::Location &loc) {
+//   if (loc.isStack()) {
+//     RsrccVisitor::Register val, addr;
+//     emit("ld " + val.toString() + ", " + loc.toString() + " ; deref1");
+//     emit("la " + addr.toString() + ", " + loc.toString() + " ; deref2");
+//     emit("st " + val.toString() + ", 0(" + addr.toString() + ") ; deref3");
+//   } else {
+//     emit("ld " + loc.toString() + ", 0(" + loc.toString() + ") ; deref");
+//   }
+//   return loc; // By definition of in place
+// }
 
 void push(int reg) {
-  emit("addi " + ESPs + ", " + ESPs + ", -4 ; push0");
-  emit("st r" + std::to_string(reg) + ", 0(" + ESPs + ") ; push1");
+  emit("addi " + ESPs + ", " + ESPs + ", -4 ; push1");
+  emit("st r" + std::to_string(reg) + ", 0(" + ESPs + ") ; push2");
 }
 
-void push(std::shared_ptr<RsrccVisitor::Register> reg) { push(*reg); }
-
-void push(RsrccVisitor::Location reg) {
-  if (!reg.isReg()) {
-    move(RsrccVisitor::Location::RTEMP, reg);
-    push(RsrccVisitor::Location::RTEMP.reg);
-  } else {
-    push(reg.reg);
-  }
-}
+void push(RsrccVisitor::Register &reg) { push(reg.reg); }
 
 void pop(int reg) {
   emit("ld r" + std::to_string(reg) + ", 0(" + ESPs + ") ; pop0");
@@ -92,43 +179,28 @@ void pop(int reg) {
   // emit("st " + RTEMPs + ", -4(" + ESPs + ") ; pop clear1");
 }
 
-void pop(std::shared_ptr<RsrccVisitor::Register> reg) { pop(*reg); }
-
-void pop(RsrccVisitor::Location reg) {
-  if (!reg.isReg()) {
-    llvm::errs() << "Error: pop " << reg.toString() << " is not a register\n";
-    return;
-  }
-  pop(reg.reg);
-}
+void pop(RsrccVisitor::Register &reg) { pop(reg.reg); }
 
 void ret() {
-  auto &reg = RsrccVisitor::Location::RTEMP;
-  pop(reg.reg);
+  RsrccVisitor::Register reg;
+  pop(reg);
   emit("br " + reg.toString() + " ; ret");
 }
+
 } // namespace
 
-void RsrccVisitor::call(std::string funcName) {
-  if (symTab.find(funcName) == symTab.end()) {
-    llvm::errs() << "Error: function " << funcName << " is not found\n";
-    return;
-  }
-  emit("brlnv " + RTEMPs);
-  // Account for return address + upcoming instructions
-  emit("addi " + RTEMPs + ", " + RTEMPs + ", 20");
-  push(Location::RTEMP.reg); // Push return address
-  emit("la " + RTEMPs + ", " + symTab[funcName].label);
-  emit("br " + RTEMPs + " ; call " + funcName);
+std::string RsrccVisitor::Register::toString() const {
+  return "r" + std::to_string(reg);
 }
 
 std::string RsrccVisitor::Location::toString() const {
-  if (isReg()) {
-    return "r" + std::to_string(*reg);
-  } else if (isStack()) {
+  if (isStack()) {
     return std::to_string(stackOffset) + "(" +
-           RsrccVisitor::Location::EBP.toString() + ")";
+           RsrccVisitor::Register::EBP.toString() + ")";
+  } else if (isReg()) {
+    return reg->toString();
   } else {
+    llvm::errs() << "Error: toString called on unallocated location\n";
     return "unallocated";
   }
 }
@@ -137,17 +209,44 @@ std::string RsrccVisitor::Location::toRegString() const {
   if (isReg()) {
     return "r" + std::to_string(*reg);
   } else {
-    return "unallocated";
+    llvm::errs() << "Error: toRegString called on unallocated location\n";
+    return "Reg unallocated";
+  }
+}
+
+std::string RsrccVisitor::Location::toAddrString() const {
+  if (isReg()) {
+    return "0(" + reg->toString() + ")";
+  } else {
+    llvm::errs() << "Error: toAddrString called on unallocated location\n";
+    return "Addr unallocated";
   }
 }
 
 std::string RsrccVisitor::Location::toStackString() const {
   if (isStack()) {
     return std::to_string(stackOffset) + "(" +
-           RsrccVisitor::Location::EBP.toString() + ")";
+           RsrccVisitor::Register::EBP.toString() + ")";
   } else {
+    llvm::errs() << "Error: toStackString called on unallocated location\n";
     return "unallocated";
   }
+}
+
+void RsrccVisitor::call(std::string funcName) {
+  if (symTab.find(funcName) == symTab.end()) {
+    llvm::errs() << "Error: function " << funcName << " is not found\n";
+    return;
+  }
+  RsrccVisitor::Register reg;
+  emit("brlnv " + reg.toString() + " ; call1 " + funcName);
+  // Account for return address + upcoming instructions
+  emit("addi " + reg.toString() + ", " + reg.toString() + ", 20 ; call2 " +
+       funcName);
+  push(reg); // Push return address
+  emit("la " + reg.toString() + ", " + symTab[funcName].label + " ; call3 " +
+       funcName);
+  emit("br " + reg.toString() + " ; call4 " + funcName);
 }
 
 void RsrccVisitor::debug(std::string str) {
@@ -155,16 +254,17 @@ void RsrccVisitor::debug(std::string str) {
     llvm::outs() << "\t;debug: " << str << "\n";
 }
 
-RsrccVisitor::Location RsrccVisitor::allocateLoc() {
-  Location loc;
-  if (Register::anyRegAvailable()) {
-    loc.reg->allocReg();
-  } else {
-    // TODO allocate on stack
-    llvm::errs() << "Error: out of registers\n";
-  }
-  return loc;
-}
+// TODO alloca? For locals within scope such as for loop.
+// RsrccVisitor::Location RsrccVisitor::allocateLoc() {
+//   Location loc;
+//   if (Register::anyRegAvailable()) {
+//     loc.reg->allocReg();
+//   } else {
+//     // TODO allocate on stack
+//     llvm::errs() << "Error: out of registers\n";
+//   }
+//   return loc;
+// }
 
 RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
   std::string name = Declaration->getNameAsString();
@@ -184,30 +284,27 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
   }
 
   // Alloc loc on stack
-  Location loc = {-1, -((currentFuncAllocatedLocals++ + 1) * 4)};
+  Location loc(-((currentFuncAllocatedLocals++ + 1) * 4));
 
   SymTabEntry entry;
   entry.name = name;
   entry.location = loc;
-  symTab[name] = entry;
+  entry.location.indirectionLevel = 1; // var is an lvalue
 
   debug("VarDecl: " + name + " at " + entry.location.toString());
 
   if (Declaration->hasInit()) {
     Expr *init = Declaration->getInit();
-    Location initLoc = evaluateExpression(init);
-    if (isa<ImplicitCastExpr>(init)) { // LvalueToRvalue
-      if (initLoc.isStack()) {
-        initLoc.reg->allocReg();
-        emit("ld " + initLoc.toRegString() + ", " + initLoc.toStackString() +
-             " ; init");
-      } else {
-        emit("ld " + initLoc.toRegString() + ", 0(" + initLoc.toString() +
-             ") ; init");
-      }
-    }
+    Location initLoc = evaluateExpression(init->IgnoreParenImpCasts());
     move(entry.location, initLoc);
   }
+
+  const Type *type = Declaration->getType().getTypePtr();
+  while (type->isPointerType()) {
+    entry.location.indirectionLevel++;
+    type = type->getPointeeType().getTypePtr();
+  }
+  symTab[name] = entry;
 
   return entry.location;
 }
@@ -224,9 +321,17 @@ RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl) {
     return Location::INVALID;
   }
 
+  Location loc = {((currentFuncArgs++ + 1) * 4)};
+
   SymTabEntry entry;
   entry.name = name;
-  entry.location = allocateLoc();
+  entry.location = loc;
+  entry.location.indirectionLevel = 1; // var is an lvalue
+  const Type *type = decl->getType().getTypePtr();
+  while (type->isPointerType()) {
+    entry.location.indirectionLevel++;
+    type = type->getPointeeType().getTypePtr();
+  }
   symTab[name] = entry;
 
   debug("ParmVarDecl: " + name + " at " + entry.location.toString());
@@ -249,7 +354,13 @@ RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl,
 
   SymTabEntry entry;
   entry.name = name;
-  entry.location = {-1, stackOffset};
+  entry.location = {stackOffset};
+  entry.location.indirectionLevel = 1; // var is an lvalue
+  const Type *type = decl->getType().getTypePtr();
+  while (type->isPointerType()) {
+    entry.location.indirectionLevel++;
+    type = type->getPointeeType().getTypePtr();
+  }
   symTab[name] = entry;
 
   debug("ParmVarDecl: " + name + " at " + entry.location.toString());
@@ -258,35 +369,13 @@ RsrccVisitor::Location RsrccVisitor::evaluateParmVarDecl(ParmVarDecl *decl,
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateAssign(BinaryOperator *op) {
+  debug("visitAssign");
   Expr *lhs = op->getLHS();
-  bool LValueToRValue = isa<ImplicitCastExpr>(lhs);
-  Expr *rhs = op->getRHS()->IgnoreParenImpCasts();
+  Expr *rhs = op->getRHS();
 
-  Location lhsLoc = evaluateExpression(lhs);
+  // Location lhsLoc = evaluateExpression(lhs);
+  Location lhsLoc = evaluateExpressionLvalue(lhs);
   Location rhsLoc = evaluateExpression(rhs);
-  if (isa<ImplicitCastExpr>(rhs)) { // LvalueToRvalue
-    emit("ld " + rhsLoc.toString() + ", " + rhsLoc.toString() + " ; assign");
-  }
-
-  // Premature optimization
-  // if (IntegerLiteral *rhsInt = dyn_cast<IntegerLiteral>(rhs)) {
-  //   emit("addi " + lhsLoc.toString() + ", " + lhsLoc.toString() + ", " +
-  //        std::to_string(rhsInt->getValue().getSExtValue()) + " ; assign");
-  // } else {
-  //   Location rhsLoc = evaluateExpression(rhs);
-  //   move(lhsLoc, rhsLoc);
-  // }
-
-  if (lhsLoc.isStack()) {
-    lhsLoc.reg->allocReg();
-    emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
-         " ; assign");
-    lhsLoc.reg->deallocReg();
-  }
-  if (!LValueToRValue) {
-    // Should move rhs to address in lhsLoc
-    moveToPointer(lhsLoc, rhsLoc);
-  }
 
   move(lhsLoc, rhsLoc);
 
@@ -307,30 +396,28 @@ RsrccVisitor::Location RsrccVisitor::evaluateDeclRefExpr(DeclRefExpr *expr) {
   name = funcName + "::" + name;
 
   SymTabEntry &entry = symTab[name];
-  debug("evaluateDeclRefExpr: " + name + " at " + entry.location.toString());
+  debug("evaluateDeclRefExpr: " + name + " at " + entry.location.toString() +
+        " ind " + std::to_string(entry.location.indirectionLevel));
   if (entry.location.isAllocated()) {
     return entry.location;
   } else {
     llvm::errs() << "Error DeclRefExpr " << name << " is not found\n";
+    return Location::INVALID;
   }
-
-  return entry.location;
 }
 
 RsrccVisitor::Location
 RsrccVisitor::evaluateIntegerLiteral(IntegerLiteral *expr) {
-  Location loc = allocateLoc();
+  Location loc;
+  if (!loc.reg->allocReg()) {
+    llvm::errs() << "Error: integer literal requires registers\n";
+    return Location::INVALID;
+  }
   debug("evaluateIntegerLiteral: " +
         std::to_string(expr->getValue().getSExtValue()) + " at " +
         loc.toString());
-  if (loc.isReg()) {
-    emit("lar " + loc.toString() + ", " +
-         std::to_string(expr->getValue().getSExtValue()));
-  } else {
-    emit("lar " + Location::RTEMP.toString() + ", " +
-         std::to_string(expr->getValue().getSExtValue()));
-    emit("st " + Location::RTEMP.toString() + ", " + loc.toString());
-  }
+  emit("lar " + loc.toString() + ", " +
+       std::to_string(expr->getValue().getSExtValue()) + " ; int literal");
   return loc;
 }
 
@@ -373,7 +460,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateStmt(Stmt *stmt) {
     return Location();
   }
   if (ImplicitCastExpr *stmt2 = dyn_cast<ImplicitCastExpr>(stmt)) {
-    return evaluateStmt(stmt2->getSubExpr());
+    return evaluateStmt(stmt2);
   }
   if (NullStmt *stmt2 = dyn_cast<NullStmt>(stmt)) {
     (void)stmt2;
@@ -405,13 +492,46 @@ RsrccVisitor::Location RsrccVisitor::evaluateExpression(Expr *expr) {
     return evaluateCallExpr(callExpr);
   }
 
-  if (isa<ImplicitCastExpr>(expr)) {
-    ImplicitCastExpr *implicitCastExpr = cast<ImplicitCastExpr>(expr);
-    return evaluateExpression(implicitCastExpr->getSubExpr());
+  if (ImplicitCastExpr *castExpr =
+          dyn_cast<ImplicitCastExpr>(expr)) { // Always produces an rvalue. We
+                                              // will assume it's from an lvalue
+    return evaluateImplicitCastExpr(castExpr);
   }
   llvm::errs() << "Error: unsupported expression: ";
   expr->dump();
   return Location();
+}
+
+RsrccVisitor::Location RsrccVisitor::evaluateExpressionLvalue(Expr *expr) {
+  if (UnaryOperator *unaryOperator = dyn_cast<UnaryOperator>(expr)) {
+    debug("evaluateExpressionLvalue: UnaryOperator");
+    if (unaryOperator->getOpcode() == UO_Deref) {
+      Location addr;
+      addr.reg->allocReg();
+      Location loc = evaluateExpression(unaryOperator->getSubExpr());
+      addr.indirectionLevel = loc.indirectionLevel;
+      if (loc.isStack()) {
+        emit("ld " + addr.toRegString() + ", " + loc.toStackString() +
+             " ; deref");
+      } else {
+        emit("ld " + addr.toRegString() + ", 0(" + loc.toRegString() +
+             ") ; deref");
+      }
+      debug("defer, ind " + std::to_string(addr.indirectionLevel));
+      return addr;
+    }
+  }
+  if (DeclRefExpr *declRefExpr = dyn_cast<DeclRefExpr>(expr)) {
+    return evaluateDeclRefExpr(declRefExpr);
+  }
+  if (ImplicitCastExpr *castExpr =
+          dyn_cast<ImplicitCastExpr>(expr)) { // Always produces an rvalue. We
+                                              // will assume it's from an lvalue
+    return evaluateImplicitCastExpr(castExpr);
+  }
+  llvm::errs() << "Error: unsupported expression: " << expr->getStmtClassName()
+               << "\n";
+  return Location::INVALID;
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
@@ -424,19 +544,20 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
   Location lhsLoc = evaluateExpression(lhs);
   Location rhsLoc = evaluateExpression(rhs);
 
-  bool lhsRegOrig = lhsLoc.isReg();
-  bool rhsRegOrig = rhsLoc.isReg();
+  bool lhsStack = lhsLoc.isStack();
+  bool rhsStack = rhsLoc.isStack();
 
-  if (!lhsRegOrig) {
+  // Computation must be done between registers, so we need to load from stack
+  if (lhsStack) {
     if (!lhsLoc.reg->allocReg()) {
       llvm::errs() << "Error: compute requires registers\n";
-      return Location();
+      return Location::INVALID;
     }
     emit("ld " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
          "; load lhs");
   }
 
-  if (!rhsRegOrig) {
+  if (rhsStack) {
     if (!rhsLoc.reg->allocReg()) {
       llvm::errs() << "Error: compute requires registers\n";
       return Location();
@@ -444,7 +565,6 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
     emit("ld " + rhsLoc.toRegString() + ", " + rhsLoc.toStackString() +
          "; load rhs");
   }
-
   Location destLoc;
   if (op->isAssignmentOp()) {
     destLoc = lhsLoc;
@@ -457,45 +577,100 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
   }
 
   if (opStr == "+") {
-    emit("add " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    emit("add " + destLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+         rhsLoc.toRegString());
   } else if (opStr == "-") {
-    emit("sub " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    emit("sub " + destLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+         rhsLoc.toRegString());
   } else if (opStr == "<<") {
-    emit("shl " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    emit("shl " + destLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+         rhsLoc.toRegString());
   } else if (opStr == ">>") {
-    emit("shr " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    emit("shr " + destLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+         rhsLoc.toRegString());
   } else if (opStr == "&") {
-    emit("and " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    emit("and " + destLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+         rhsLoc.toRegString());
   } else if (opStr == "|") {
-    emit("or " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    emit("or " + destLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+         rhsLoc.toRegString());
   } else if (opStr == "^") { // no xor instruction
     // TODO
     llvm::errs() << "Error: unsupported compute (xor coming soon!): " << opStr
                  << "\n";
   } else if (opStr == "+=") {
-    emit("add " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    // if (!LValueToRValue) {
+    //   emit("add " + lhsLoc.toString() + ", " + lhsLoc.toString() + ", " +
+    //        rhsLoc.toString());
+    // } else {
+    //   Location tempLoc;
+    //   tempLoc.reg->allocReg();
+    //   emit("ld " + tempLoc.toRegString() + ", 0(" + lhsLoc.toRegString() +
+    //        ") ; += load lhs");
+    //   emit("add " + tempLoc.toString() + ", " + tempLoc.toString() + ", " +
+    //        rhsLoc.toString());
+    //   emit("st " + tempLoc.toString() + ", 0(" + lhsLoc.toRegString() +
+    //        ") ; += store lhs");
+    // }
+    if (lhsStack) {
+      emit("add " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString() + " ; += compute");
+      emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+           " ; += store");
+    } else {
+      emit("add " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString());
+    }
   } else if (opStr == "-=") {
-    emit("sub " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    if (lhsStack) {
+      emit("sub " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString() + " ; -= compute");
+      emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+           " ; -= store");
+    } else {
+      emit("sub " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString());
+    }
   } else if (opStr == "<<=") {
-    emit("shl " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    if (lhsStack) {
+      emit("shl " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString() + " ; <<= compute");
+      emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+           " ; <<= store");
+    } else {
+      emit("shl " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString());
+    }
   } else if (opStr == ">>=") {
-    emit("shr " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    if (lhsStack) {
+      emit("shr " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString() + " ; >>= compute");
+      emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+           " ; >>= store");
+    } else {
+      emit("shr " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString());
+    }
   } else if (opStr == "&=") {
-    emit("and " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    if (lhsStack) {
+      emit("and " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString() + " ; &= compute");
+      emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+           " ; &= store");
+    } else {
+      emit("and " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString());
+    }
   } else if (opStr == "|=") {
-    emit("or " + destLoc.toString() + ", " + lhsLoc.toString() + ", " +
-         rhsLoc.toString());
+    if (lhsStack) {
+      emit("or " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString() + " ; |= compute");
+      emit("st " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
+           " ; |= store");
+    } else {
+      emit("or " + lhsLoc.toRegString() + ", " + lhsLoc.toRegString() + ", " +
+           rhsLoc.toRegString());
+    }
   } else if (opStr == "^=") { // no xor instruction
     // TODO
     llvm::errs() << "Error: unsupported compute (xor coming soon!): " << opStr
@@ -505,17 +680,12 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompute(BinaryOperator *op) {
   }
 
   // Clean up regs
-  if (!rhsRegOrig && lhsLoc.stackOffset != rhsLoc.stackOffset) {
+  if (lhsStack && op->isAssignmentOp()) {
+    lhsLoc.reg->deallocReg();
+  }
+  if (rhsStack) {
     // store rhs back to stack, unless it's the same as lhs (a += a for example)
     rhsLoc.reg->deallocReg();
-  }
-
-  if (!lhsRegOrig && op->isAssignmentOp()) {
-    // store lhs back to stack
-    // TODO negative offset?
-    emit("st " + lhsLoc.toString() + ", " + std::to_string(lhsLoc.stackOffset) +
-         "(" + EBPs + ")");
-    lhsLoc.reg->deallocReg();
   }
 
   return destLoc;
@@ -536,58 +706,62 @@ std::string RsrccVisitor::compareHelper(std::string_view opStr) {
 RsrccVisitor::Location RsrccVisitor::evaluateCompare(BinaryOperator *op) {
   std::string_view opStr = op->getOpcodeStr();
 
-  Expr *lhs = op->getLHS()->IgnoreParenImpCasts();
-  Expr *rhs = op->getRHS()->IgnoreParenImpCasts();
+  Expr *lhs = op->getLHS();
+  // bool LValueToRValue = isa<ImplicitCastExpr>(lhs);
+  Expr *rhs = op->getRHS();
 
   debug("visitCompare: " + std::string(opStr));
   Location lhsLoc = evaluateExpression(lhs);
   Location rhsLoc = evaluateExpression(rhs);
 
-  bool lhsRegOrig = lhsLoc.isReg();
-  bool rhsRegOrig = rhsLoc.isReg();
+  bool lhsStack = lhsLoc.isStack();
+  bool rhsStack = rhsLoc.isStack();
 
-  if (!lhsRegOrig) {
-    lhsLoc.reg->allocReg();
+  if (lhsStack) {
+    if (!lhsLoc.reg->allocReg()) {
+      llvm::errs() << "Error: compare requires registers\n";
+      return Location::INVALID;
+    }
     emit("ld " + lhsLoc.toRegString() + ", " + lhsLoc.toStackString() +
-         "; load lhs");
+         "; compare load lhs");
   }
-  if (!rhsRegOrig) {
-    rhsLoc.reg->allocReg();
+  if (rhsStack) {
+    if (!rhsLoc.reg->allocReg()) {
+      llvm::errs() << "Error: compare requires registers\n";
+      return Location::INVALID;
+    }
     emit("ld " + rhsLoc.toRegString() + ", " + rhsLoc.toStackString() +
-         "; load rhs");
+         "; compare load rhs");
   }
 
-  if (!lhsLoc.isReg() || !rhsLoc.isReg()) {
-    llvm::errs() << "Error: compare requires registers\n";
-    return Location();
-  }
+  Register addr;
 
   std::string instruction = compareHelper(opStr);
 
   int falseLabel = currentLabel++;
   int endLabel = currentLabel++;
   // Comparison
-  emit("sub " + EAXs + ", " + lhsLoc.toString() + ", " + rhsLoc.toString());
-  emit("lar " + RTEMPs + ", label" + std::to_string(falseLabel));
-  emit(instruction + " " + RTEMPs + ", " + EAXs + "; cmp");
+  emit("sub " + EAXs + ", " + lhsLoc.toRegString() + ", " + rhsLoc.toRegString());
+  emit("lar " + addr.toString() + ", label" + std::to_string(falseLabel));
+  emit(instruction + " " + addr.toString() + ", " + EAXs + "; cmp");
   // True
   emit("lar " + EAXs + ", 0");
-  emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
-  emit("br " + RTEMPs + " ; cmp");
+  emit("lar " + addr.toString() + ", label" + std::to_string(endLabel));
+  emit("br " + addr.toString() + " ; cmp");
   // False
   emit("label" + std::to_string(falseLabel) + ":");
   emit("lar " + EAXs + ", 1");
   emit("label" + std::to_string(endLabel) + ":");
 
   // Clean up regs
-  if (!rhsRegOrig) {
-    rhsLoc.reg->deallocReg();
-  }
-  if (!lhsRegOrig) {
+  if (lhsStack) {
     lhsLoc.reg->deallocReg();
   }
+  if (rhsStack) {
+    rhsLoc.reg->deallocReg();
+  }
 
-  return Location::EAX;
+  return Location(EAXp);
 }
 
 RsrccVisitor::Location
@@ -603,17 +777,21 @@ RsrccVisitor::evaluateBinaryOperator(BinaryOperator *op) {
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
+  std::string lval = op->isLValue() ? "lval" : "rval";
   std::string_view opStr = op->getOpcodeStr(op->getOpcode());
+  debug("visitUnaryOperator: " + std::string(opStr) + " " + lval);
+  Location loc = evaluateExpression(op->getSubExpr());
+
   if (opStr == "++") {
     if (op->isPrefix()) {
-      Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-      Location loc = evaluateExpression(expr);
       if (loc.isStack()) {
-        emit("ld " + RTEMPs + ", " + loc.toString() + " ; pre++");
-        emit("addi " + RTEMPs + ", " + RTEMPs + ", 1 ; pre++");
-        emit("st " + RTEMPs + ", " + loc.toString() + " ; pre++");
+        Register reg;
+        emit("ld " + reg.toString() + ", " + loc.toString() + " ; pre++");
+        emit("addi " + reg.toString() + ", " + reg.toString() + ", 1 ; pre++");
+        emit("st " + reg.toString() + ", " + loc.toString() + " ; pre++");
       } else {
-        emit("addi " + loc.toString() + ", " + loc.toString() + ", 1 ; pre++");
+        emit("addi " + loc.toRegString() + ", " + loc.toRegString() +
+             ", 1 ; pre++");
       }
       return loc;
     } else if (op->isPostfix()) {
@@ -626,14 +804,14 @@ RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
 
   if (opStr == "--") {
     if (op->isPrefix()) {
-      Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-      Location loc = evaluateExpression(expr);
       if (loc.isStack()) {
-        emit("ld " + RTEMPs + ", " + loc.toString() + " ; pre--");
-        emit("addi " + RTEMPs + ", " + RTEMPs + ", -1 ; pre--");
-        emit("st " + RTEMPs + ", " + loc.toString() + " ; pre--");
+        Register reg;
+        emit("ld " + reg.toString() + ", " + loc.toStackString() + " ; pre--");
+        emit("addi " + reg.toString() + ", " + reg.toString() + ", -1 ; pre--");
+        emit("st " + reg.toString() + ", " + loc.toStackString() + " ; pre--");
       } else {
-        emit("addi " + loc.toString() + ", " + loc.toString() + ", -1 ; pre--");
+        emit("addi " + loc.toRegString() + ", " + loc.toRegString() +
+             ", -1 ; pre--");
       }
       return loc;
     } else if (op->isPostfix()) {
@@ -645,62 +823,85 @@ RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
   }
 
   if (opStr == "-") {
-    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-    Location loc = evaluateExpression(expr);
-    emit("neg " + loc.toString() + ", " + loc.toString() + " ; neg");
+    if (loc.isStack()) {
+      Register reg;
+      emit("ld " + reg.toString() + ", " + loc.toStackString() + " ; neg");
+      emit("neg " + reg.toString() + ", " + reg.toString() + " ; neg");
+      emit("st " + reg.toString() + ", " + loc.toStackString() + " ; neg");
+    } else {
+      emit("sub " + loc.toRegString() + ", " + loc.toRegString() + ", 0 ; neg");
+    }
     return loc;
   }
 
   if (opStr == "~") {
-    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-    Location loc = evaluateExpression(expr);
-    emit("not " + loc.toString() + ", " + loc.toString() + " ; not");
+    if (loc.isStack()) {
+      Register reg;
+      emit("ld " + reg.toString() + ", " + loc.toStackString() + " ; not");
+      emit("not " + reg.toString() + ", " + reg.toString() + " ; not");
+      emit("st " + reg.toString() + ", " + loc.toStackString() + " ; not");
+    } else {
+      emit("not " + loc.toRegString() + ", " + loc.toRegString() + " ; not");
+    }
     return loc;
   }
 
   if (opStr == "!") {
-    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-    Location loc = evaluateExpression(expr);
-    emit("lar " + RTEMPs + ", label" + std::to_string(currentLabel));
-    emit("brzr " + RTEMPs + ", " + loc.toString() + " ; bang!");
-    emit("lar " + loc.toString() + ", 0");
-    emit("lar " + RTEMPs + ", label" + std::to_string(currentLabel + 1));
-    emit("br " + RTEMPs + " ; bang!");
+    Register addr;
+    if (loc.isStack()) {
+      loc.reg->allocReg();
+      move(loc.reg, loc);
+    }
+    emit("lar " + addr.toString() + ", label" + std::to_string(currentLabel) +
+         " ; bang1");
+    emit("brzr " + addr.toString() + ", " + loc.toRegString() + " ; bang2");
+    emit("lar " + loc.toRegString() + ", 0 ; bang3");
+    emit("lar " + addr.toString() + ", label" +
+         std::to_string(currentLabel + 1) + " ; bang4");
+    emit("br " + addr.toString() + " ; bang5");
     emit("label" + std::to_string(currentLabel) + ":");
-    emit("lar " + loc.toString() + ", 1");
+    emit("lar " + loc.toRegString() + ", 1");
     emit("label" + std::to_string(currentLabel + 1) + ":");
     currentLabel += 2;
+
+    if (loc.isStack()) {
+      emit("st " + loc.toRegString() + ", " + loc.toStackString() + " ; bang6");
+      loc.reg->deallocReg();
+    }
     return loc;
   }
 
   if (opStr == "&") {
-    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-    Location loc = evaluateExpression(expr);
-    if (loc.isStack()) { // TODO assert?
-      emit("la " + RTEMPs + ", " + loc.toString() + " ; addr");
-      return Location::RTEMP;
+    if (loc.isStack()) {
+      Location loc2;
+      loc2.reg->allocReg();
+      emit("la " + loc2.toRegString() + ", " + loc.toStackString() + " ; &");
+      loc2.indirectionLevel++;
+      return loc2;
     } else {
       llvm::errs() << "Error: & requires stack location\n";
       return Location::INVALID;
     }
-    return loc;
   }
 
   if (opStr == "*") {
-    Expr *expr = op->getSubExpr()->IgnoreParenImpCasts();
-    Location loc = evaluateExpression(expr);
-    if (loc.isStack()) {
-      emit("la " + RTEMPs + ", " + loc.toStackString() + " ; deref");
-      emit("ld " + RTEMPs + ", 0(" + RTEMPs + ") ; deref");
-      return Location::RTEMP;
-    } else {
-      llvm::errs() << "Error: deref requires stack location\n";
-      return Location::INVALID;
-    }
+    return deref(loc);
   }
 
   llvm::errs() << "Error: unsupported unary operator: " << opStr << "\n";
-  return Location();
+  return Location::INVALID;
+}
+
+RsrccVisitor::Location
+RsrccVisitor::evaluateImplicitCastExpr(ImplicitCastExpr *expr) {
+  std::string lval = expr->isLValue() ? "lval" : "rval";
+  debug("visitImplicitCastExpr: " + lval);
+  Location loc = evaluateExpression(expr->getSubExpr());
+  // Register reg;
+  // emit("ld " + reg.toString() + ", " + loc.toString() + " ; cast");
+  // std::shared_ptr<Register> regPtr =
+  // std::make_shared<Register>(std::move(reg));
+  return loc;
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateIfStmt(IfStmt *stmt) {
@@ -714,15 +915,16 @@ RsrccVisitor::Location RsrccVisitor::evaluateIfStmt(IfStmt *stmt) {
   int endLabel = currentLabel++;
 
   Location condLoc = evaluateExpression(cond);
-  emit("lar " + RTEMPs + ", label" + std::to_string(elseLabel));
-  emit("brzr " + RTEMPs + ", " + condLoc.toString() + " ; if");
+  Register addr;
+  emit("lar " + addr.toString() + ", label" + std::to_string(elseLabel));
+  emit("brzr " + addr.toString() + ", " + condLoc.toString() + " ; if");
 
   // Then
   if (then) {
     evaluateStmt(then);
   }
-  emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
-  emit("br " + RTEMPs + " ; if");
+  emit("lar " + addr.toString() + ", label" + std::to_string(endLabel));
+  emit("br " + addr.toString() + " ; if");
 
   // Else
   emit("label" + std::to_string(elseLabel) + ":");
@@ -735,7 +937,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateIfStmt(IfStmt *stmt) {
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateWhileStmt(WhileStmt *stmt) {
-  Expr *cond = stmt->getCond()->IgnoreParenImpCasts();
+  Expr *cond = stmt->getCond();
   Stmt *body = stmt->getBody();
 
   debug("evaluateWhileStmt");
@@ -744,18 +946,30 @@ RsrccVisitor::Location RsrccVisitor::evaluateWhileStmt(WhileStmt *stmt) {
   int endLabel = currentLabel++;
 
   emit("label" + std::to_string(condLabel) + ":");
+
   Location condLoc = evaluateExpression(cond);
-  emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
-  emit("brzr " + RTEMPs + ", " + condLoc.toString() + " ; while");
+  // if (!condLoc.isReg()) {
+  //   condLoc.reg->allocReg();
+  //   emit("ld " + condLoc.toRegString() + ", " + condLoc.toString() +
+  //        " ; while load");
+  // }
+
+  Register addr;
+  emit("lar " + addr.toString() + ", label" + std::to_string(endLabel));
+  emit("brzr " + addr.toString() + ", " + condLoc.toRegString() + " ; while");
 
   // Body
   if (body) {
     evaluateStmt(body);
   }
-  emit("lar " + RTEMPs + ", label" + std::to_string(condLabel));
-  emit("br " + RTEMPs + " ; while");
+  emit("lar " + addr.toString() + ", label" + std::to_string(condLabel));
+  emit("br " + addr.toString() + " ; while");
 
   emit("label" + std::to_string(endLabel) + ":");
+
+  if (condLoc.isStack()) {
+    condLoc.reg->deallocReg();
+  }
 
   return Location();
 }
@@ -771,6 +985,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateForStmt(ForStmt *stmt) {
   int condLabel = currentLabel++;
   int endLabel = currentLabel++;
 
+  Register addr;
+
   // Init
   if (init) {
     evaluateStmt(init);
@@ -779,8 +995,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateForStmt(ForStmt *stmt) {
   // Cond
   if (cond) {
     Location condLoc = evaluateExpression(cond);
-    emit("lar " + RTEMPs + ", label" + std::to_string(endLabel));
-    emit("brzr " + RTEMPs + ", " + condLoc.toString() + " ; for");
+    emit("lar " + addr.toString() + ", label" + std::to_string(endLabel));
+    emit("brzr " + addr.toString() + ", " + condLoc.toString() + " ; for");
   }
   // Body
   if (body) {
@@ -790,8 +1006,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateForStmt(ForStmt *stmt) {
   if (inc) {
     evaluateStmt(inc);
   }
-  emit("lar " + RTEMPs + ", label" + std::to_string(condLabel));
-  emit("br " + RTEMPs + " ; for");
+  emit("lar " + addr.toString() + ", label" + std::to_string(condLabel));
+  emit("br " + addr.toString() + " ; for");
 
   emit("label" + std::to_string(endLabel) + ":");
 
@@ -799,14 +1015,14 @@ RsrccVisitor::Location RsrccVisitor::evaluateForStmt(ForStmt *stmt) {
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateReturnStmt(ReturnStmt *stmt) {
-  Expr *expr = stmt->getRetValue()->IgnoreParenImpCasts();
-  Location loc = evaluateExpression(expr);
+  ;
+  Location loc = evaluateExpression(stmt->getRetValue());
   if (loc.isStack()) {
     emit("ld " + EAXs + ", " + loc.toString() + " ; return mov");
   } else {
     emit("addi " + EAXs + ", " + loc.toString() + ", 0 ; return mov");
   }
-  return RsrccVisitor::Location::EAX;
+  return Location(EAXp);
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
@@ -825,6 +1041,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
 
   // Push arguments
   std::vector<Location> argLocs;
+  currentFuncArgs = 0;
 
   for (Expr *arg : expr->arguments()) {
     Location loc = evaluateExpression(arg);
@@ -832,7 +1049,13 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
   }
   for (std::vector<Location>::reverse_iterator i = argLocs.rbegin();
        i != argLocs.rend(); ++i) {
-    push(*i);
+    Register reg;
+    if (i->isReg()) {
+      push(*(i->reg));
+    } else {
+      emit("ld " + reg.toString() + ", " + i->toStackString() + " ; push arg");
+      push(reg);
+    }
   }
 
   // Call function
@@ -849,7 +1072,7 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
     }
   }
 
-  return RsrccVisitor::Location::EAX;
+  return Location(EAXp);
 }
 
 bool RsrccVisitor::evaluateFunctionDecl(FunctionDecl *decl) {
@@ -894,7 +1117,7 @@ bool RsrccVisitor::evaluateFunctionDecl(FunctionDecl *decl) {
         std::to_string(currentFuncTotalLocals) + " locals");
 
   // Emit prolog
-  push(Location::EBP);
+  push(Register::EBP);
   emit("addi " + EBPs + ", " + ESPs + ", 0 ; mov ebp, esp");
   // Allcate space for locals (assuming 4 bytes each)
   emit("addi " + ESPs + ", " + ESPs + ", " +
@@ -914,7 +1137,7 @@ bool RsrccVisitor::evaluateFunctionDecl(FunctionDecl *decl) {
 
   // Emit epilog
   emit("addi " + ESPs + ", " + EBPs + ", 0 ; mov esp, ebp");
-  pop(Location::EBP);
+  pop(Register::EBP);
   ret();
 
   return false;
@@ -933,11 +1156,13 @@ bool RsrccVisitor::VisitTranslationUnitDecl(TranslationUnitDecl *decl) {
         emit("la " + EBPs + ", STACK");
 
         // Create main stack frame
-        emit("la " + RTEMPs + ", END ; main exit");
-        push(Location::RTEMP); // Push return address
-        emit("la " + RTEMPs + ", " +
+        Register reg;
+        emit("la " + reg.toString() + ", END ; main exit");
+        push(reg); // Push return address
+        emit("la " + reg.toString() + ", " +
              std::string(ENTRY_POINT)); // must evaluate main first
-        emit("br " + RTEMPs + " ; call " + "main");
+        emit("br " + reg.toString() + " ; call " + "main");
+        reg.deallocReg(); // TODO needed? automatic, right?
       }
     }
   }
@@ -948,9 +1173,10 @@ bool RsrccVisitor::VisitTranslationUnitDecl(TranslationUnitDecl *decl) {
   }
 
   // Emit end
+  Register reg;
   emit("stop");
-  emit("la " + RTEMPs + ", END");
+  emit("la " + reg.toString() + ", END");
   emit("END:");
-  emit("br " + RTEMPs);
+  emit("br " + reg.toString());
   return false; // I guess this means this will only work for one TU
 }
