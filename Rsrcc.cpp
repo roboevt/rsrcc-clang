@@ -59,15 +59,14 @@ void move(const RsrccVisitor::Location &dst,
       }
     } else { // storing to register
       if (src.isReg()) {
-        emit("addi " + dst.toRegString() + ", " + src.toRegString() + ", 0 ; mov");
+        emit("addi " + dst.toRegString() + ", " + src.toRegString() +
+             ", 0 ; mov");
       } else {
         emit("ld " + dst.toRegString() + ", " + src.toStackString() + " ; mov");
       }
     }
   }
 }
-
-
 
 // void moveToAddr(const RsrccVisitor::Location &destAddr,
 //                 const RsrccVisitor::Location &src) {
@@ -283,13 +282,22 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
     return Location::INVALID;
   }
 
+  int size = 1;
+  int indirectionLevel = 1;
+  if (auto arrDecl =
+          dyn_cast<ConstantArrayType>(Declaration->getType().getTypePtr())) {
+    size = arrDecl->getSize().getSExtValue();
+    indirectionLevel++;
+  }
+
   // Alloc loc on stack
-  Location loc(-((currentFuncAllocatedLocals++ + 1) * 4));
+  Location loc(-((currentFuncAllocatedLocals + 1) * 4));
+  currentFuncAllocatedLocals += size;
 
   SymTabEntry entry;
   entry.name = name;
   entry.location = loc;
-  entry.location.indirectionLevel = 1; // var is an lvalue
+  entry.location.indirectionLevel = indirectionLevel;
 
   debug("VarDecl: " + name + " at " + entry.location.toString());
 
@@ -303,6 +311,9 @@ RsrccVisitor::Location RsrccVisitor::evaluateVarDecl(VarDecl *Declaration) {
   while (type->isPointerType()) {
     entry.location.indirectionLevel++;
     type = type->getPointeeType().getTypePtr();
+  }
+  if (type->isArrayType()) {
+    entry.location.indirectionLevel++;
   }
   symTab[name] = entry;
 
@@ -491,11 +502,12 @@ RsrccVisitor::Location RsrccVisitor::evaluateExpression(Expr *expr) {
   if (CallExpr *callExpr = dyn_cast<CallExpr>(expr)) {
     return evaluateCallExpr(callExpr);
   }
-
-  if (ImplicitCastExpr *castExpr =
-          dyn_cast<ImplicitCastExpr>(expr)) { // Always produces an rvalue. We
-                                              // will assume it's from an lvalue
-    return evaluateImplicitCastExpr(castExpr);
+  if (ImplicitCastExpr *castExpr = dyn_cast<ImplicitCastExpr>(expr)) {
+    return evaluateExpression(castExpr->getSubExpr());
+  }
+  if (ArraySubscriptExpr *arraySubsciptExpr =
+          dyn_cast<ArraySubscriptExpr>(expr)) {
+    return evaluateArraySubscriptExpr(arraySubsciptExpr);
   }
   llvm::errs() << "Error: unsupported expression: ";
   expr->dump();
@@ -524,10 +536,29 @@ RsrccVisitor::Location RsrccVisitor::evaluateExpressionLvalue(Expr *expr) {
   if (DeclRefExpr *declRefExpr = dyn_cast<DeclRefExpr>(expr)) {
     return evaluateDeclRefExpr(declRefExpr);
   }
-  if (ImplicitCastExpr *castExpr =
-          dyn_cast<ImplicitCastExpr>(expr)) { // Always produces an rvalue. We
-                                              // will assume it's from an lvalue
-    return evaluateImplicitCastExpr(castExpr);
+  if (ImplicitCastExpr *castExpr = dyn_cast<ImplicitCastExpr>(expr)) {
+    return evaluateExpression(castExpr->getSubExpr());
+  }
+  if (ArraySubscriptExpr *arraySubsciptExpr =
+          dyn_cast<ArraySubscriptExpr>(expr)) {  // TODO funcion
+    Expr *base = arraySubsciptExpr->getBase();
+    Expr *index = arraySubsciptExpr->getIdx();
+    Location baseLoc = evaluateExpression(base);
+    Location indexLoc = evaluateExpression(index);
+    emit("shl " + indexLoc.toRegString() + ", " + indexLoc.toRegString() +
+         ", 2 ; array subscript");
+    emit("neg " + indexLoc.toRegString() + ", " + indexLoc.toRegString() +
+         " ; array subscript"); // Stack grows downwards. // TODO make arr[0]
+                                // bottom of array instead of top.
+    Location reg;
+    reg.indirectionLevel = baseLoc.indirectionLevel - 1;
+    debug("array ind: " + std::to_string(reg.indirectionLevel));
+    reg.reg->allocReg();
+    emit("la " + reg.toRegString() + ", " + baseLoc.toStackString() +
+         " ; array subscript");
+    emit("add " + reg.toRegString() + ", " + reg.toString() + ", " +
+         indexLoc.toString() + " ; array subscript");
+    return reg;
   }
   llvm::errs() << "Error: unsupported expression: " << expr->getStmtClassName()
                << "\n";
@@ -741,7 +772,8 @@ RsrccVisitor::Location RsrccVisitor::evaluateCompare(BinaryOperator *op) {
   int falseLabel = currentLabel++;
   int endLabel = currentLabel++;
   // Comparison
-  emit("sub " + EAXs + ", " + lhsLoc.toRegString() + ", " + rhsLoc.toRegString());
+  emit("sub " + EAXs + ", " + lhsLoc.toRegString() + ", " +
+       rhsLoc.toRegString());
   emit("lar " + addr.toString() + ", label" + std::to_string(falseLabel));
   emit(instruction + " " + addr.toString() + ", " + EAXs + "; cmp");
   // True
@@ -892,16 +924,44 @@ RsrccVisitor::Location RsrccVisitor::evaluateUnaryOperator(UnaryOperator *op) {
   return Location::INVALID;
 }
 
+// RsrccVisitor::Location
+// RsrccVisitor::evaluateImplicitCastExpr(ImplicitCastExpr *expr) {
+//   std::string lval = expr->isLValue() ? "lval" : "rval";
+//   debug("visitImplicitCastExpr: " + lval);
+//   Location loc = evaluateExpression(expr->getSubExpr());
+//   // Register reg;
+//   // emit("ld " + reg.toString() + ", " + loc.toString() + " ; cast");
+//   // std::shared_ptr<Register> regPtr =
+//   // std::make_shared<Register>(std::move(reg));
+//   return loc;
+// }
 RsrccVisitor::Location
-RsrccVisitor::evaluateImplicitCastExpr(ImplicitCastExpr *expr) {
-  std::string lval = expr->isLValue() ? "lval" : "rval";
-  debug("visitImplicitCastExpr: " + lval);
-  Location loc = evaluateExpression(expr->getSubExpr());
-  // Register reg;
-  // emit("ld " + reg.toString() + ", " + loc.toString() + " ; cast");
-  // std::shared_ptr<Register> regPtr =
-  // std::make_shared<Register>(std::move(reg));
-  return loc;
+RsrccVisitor::evaluateArraySubscriptExpr(ArraySubscriptExpr *expr) {
+  Expr *base = expr->getBase();
+  Expr *index = expr->getIdx();
+  Location baseLoc = evaluateExpression(base);
+  Location indexLoc = evaluateExpression(index);
+  emit("shl " + indexLoc.toRegString() + ", " + indexLoc.toRegString() +
+       ", 2 ; array subscript");
+  emit("neg " + indexLoc.toRegString() + ", " + indexLoc.toRegString() +
+       " ; array subscript"); // Stack grows downwards. // TODO make arr[0]
+                              // bottom of array instead of top.
+  if (baseLoc.isStack()) {
+    Location reg;
+    reg.indirectionLevel = baseLoc.indirectionLevel - 1;
+    debug("array ind: " + std::to_string(reg.indirectionLevel));
+    reg.reg->allocReg();
+    emit("la " + reg.toRegString() + ", " + baseLoc.toStackString() +
+         " ; array subscript");
+    emit("add " + reg.toRegString() + ", " + reg.toString() + ", " +
+         indexLoc.toString() + " ; array subscript");
+    emit("ld " + reg.toRegString() + ", 0(" + reg.toRegString() +
+         ") ; array subscript");
+    return reg;
+  } else {
+    llvm::errs() << "Error: array subscript requires stack location\n";
+    return Location::INVALID;
+  }
 }
 
 RsrccVisitor::Location RsrccVisitor::evaluateIfStmt(IfStmt *stmt) {
@@ -1104,9 +1164,17 @@ bool RsrccVisitor::evaluateFunctionDecl(FunctionDecl *decl) {
       DeclStmt *declStmt = cast<DeclStmt>(*i);
       for (DeclStmt::decl_iterator DI = declStmt->decl_begin();
            DI != declStmt->decl_end(); ++DI) {
-        if (isa<VarDecl>(*DI)) {
-          currentFuncTotalLocals++;
-          // evaluateVarDecl(cast<VarDecl>(*DI));
+        if (auto *varDecl = dyn_cast<VarDecl>(*DI)) {
+          if (auto arrDecl = dyn_cast<ConstantArrayType>(
+                  varDecl->getType().getTypePtr())) {
+            currentFuncTotalLocals += arrDecl->getSize().getSExtValue();
+            debug("Found local array " + varDecl->getNameAsString() + " with " +
+                  std::to_string(arrDecl->getSize().getSExtValue()) +
+                  " elements");
+          } else {
+            // local var
+            currentFuncTotalLocals++;
+          }
         }
       }
     }

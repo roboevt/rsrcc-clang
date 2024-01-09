@@ -150,5 +150,6 @@ private:
   std::string compareHelper(std::string_view opStr);
   Location evaluateCompare(clang::BinaryOperator *op);
   Location evaluateAssign(clang::BinaryOperator *op);
-  Location evaluateImplicitCastExpr(clang::ImplicitCastExpr *expr);
+  // Location evaluateImplicitCastExpr(clang::ImplicitCastExpr *expr);
+  Location evaluateArraySubscriptExpr(clang::ArraySubscriptExpr *expr);
 };
