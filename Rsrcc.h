@@ -146,10 +146,12 @@ private:
   Location evaluateForStmt(clang::ForStmt *stmt);
   Location evaluateBinaryOperator(clang::BinaryOperator *op);
   Location evaluateUnaryOperator(clang::UnaryOperator *op);
+  Location evaluateDerefLvalue(clang::UnaryOperator *op);
   Location evaluateCompute(clang::BinaryOperator *op);
   std::string compareHelper(std::string_view opStr);
   Location evaluateCompare(clang::BinaryOperator *op);
   Location evaluateAssign(clang::BinaryOperator *op);
-  // Location evaluateImplicitCastExpr(clang::ImplicitCastExpr *expr);
+  Location evaluateImplicitCastExpr(clang::ImplicitCastExpr *expr);
   Location evaluateArraySubscriptExpr(clang::ArraySubscriptExpr *expr);
+  Location evaluateArraySubscriptExprLvalue(clang::ArraySubscriptExpr *expr);
 };
