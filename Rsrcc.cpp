@@ -1127,9 +1127,11 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
   debug("evaluateCallExpr: " + name);
 
   // Push caller saved registers (all for now) that are used (slow!)
+  std::vector<int> usedRegs;
   for (int i = 1; i < MAX_REGS; i++) {
     if (Register::isUsed(i)) {
       push(i);
+      usedRegs.push_back(i);
       debug("push caller saved register: " + std::to_string(i));
     }
   }
@@ -1161,10 +1163,9 @@ RsrccVisitor::Location RsrccVisitor::evaluateCallExpr(CallExpr *expr) {
        std::to_string(4 * expr->getNumArgs()) + " ; clean stack");
 
   // Pop caller saved registers (all for now) that are used
-  for (int i = 31; i > 0; i--) {
-    if (Register::isUsed(i)) {
-      pop(i);
-    }
+  for (int i : usedRegs) {
+    pop(i);
+    debug("pop caller saved register: " + std::to_string(i));
   }
 
   return Location(EAXp);
